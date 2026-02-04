@@ -98,9 +98,10 @@ DATA_PARAMS = {
 # MLP Architectures (easily modifiable)
 # ============================
 MLP_ARCHITECTURES = {
-    "MLP_1": [128, 128, 64],              # 3 hidden layers
-    "MLP_2": [128, 64, 64],               # 3 hidden layers
-    "MLP_3": [64, 64, 64, 64, 64],        # 5 hidden layers
+    "MLP_0": [],                        # No hidden layers (logistic regression)
+    "MLP_1": [64, 64],              # 2 hidden layers
+    "MLP_2": [64, 64, 64],               # 3 hidden layers
+    "MLP_3": [64, 64, 64, 64],        # 4 hidden layers
 }
 
 
@@ -112,7 +113,7 @@ class MLP(nn.Module):
     -----------
     hidden_layers : list
         List of hidden layer sizes (e.g., [128, 128, 64])
-        Length can be 1 to 5
+        Length can be 0 to 5; [] means no hidden layers
     input_size : int
         Input dimension (default 2 for 2D coordinates)
     output_size : int
@@ -122,8 +123,8 @@ class MLP(nn.Module):
         super(MLP, self).__init__()
         
         # Validate hidden layers
-        if not isinstance(hidden_layers, list) or len(hidden_layers) == 0:
-            raise ValueError("hidden_layers must be a non-empty list")
+        if not isinstance(hidden_layers, list):
+            raise ValueError("hidden_layers must be a list")
         if len(hidden_layers) > 5:
             raise ValueError("Maximum 5 hidden layers supported")
         
@@ -444,10 +445,22 @@ if __name__ == "__main__":
             print("\n" + "-"*60)
             print("Test Results:")
             print("-"*60)
+            test_rows = []
             for model_name in models_to_test:
                 model = trained_models[model_name]
                 accuracy = evaluate_model(model, test_loader)
                 print(f"{model_name:20s} - Test Accuracy: {accuracy*100:.2f}%")
+                structure = MLP_ARCHITECTURES.get(model_name, "N/A")
+                test_rows.append((model_name, structure, accuracy))
+
+            if test_rows:
+                print("\n" + "-"*60)
+                print("Summary (Structure & Accuracy)")
+                print("-"*60)
+                print(f"{'Model':12s} | {'Structure':24s} | {'Accuracy':>9s}")
+                print("-"*60)
+                for name, structure, acc in test_rows:
+                    print(f"{name:12s} | {str(structure):24s} | {acc*100:8.2f}%")
         
         elif choice == "3":
             if not trained_models:
