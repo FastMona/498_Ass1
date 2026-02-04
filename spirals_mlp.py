@@ -329,6 +329,42 @@ def evaluate_model(model, test_loader):
     return correct / total
 
 
+def plot_learning_curves(train_histories, title="Learning Curves", fig=None):
+    """
+    Plot learning curves (loss vs epochs) for one or more models.
+
+    Parameters:
+    -----------
+    train_histories : dict
+        {model_name: {"train_losses": [...], "test_losses": [...]}}
+    title : str
+        Plot title
+    """
+    if not train_histories:
+        return
+
+    if fig is None or not plt.fignum_exists(fig.number):
+        fig = plt.figure(figsize=(9, 6))
+    else:
+        fig.clf()
+        plt.figure(fig.number)
+    for model_name, history in train_histories.items():
+        train_losses = history.get("train_losses", [])
+        if train_losses:
+            epochs = range(1, len(train_losses) + 1)
+            plt.plot(epochs, train_losses, label=f"{model_name} Train")
+
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title(title)
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.show(block=False)
+    plt.pause(0.001)
+    return fig
+
+
 if __name__ == "__main__":
     print("="*60)
     print("INTERTWINED SPIRALS CLASSIFICATION WITH MLPs")
@@ -355,6 +391,7 @@ if __name__ == "__main__":
     trained_models = {}
     train_histories = {}
     plot_fig = None
+    learning_curve_fig = None
     plt.ion()
     
     while True:
@@ -428,6 +465,13 @@ if __name__ == "__main__":
                 print("-"*60)
                 for name, structure, acc in train_rows:
                     print(f"{name:12s} | {str(structure):24s} | {acc*100:8.2f}%")
+
+                # Plot learning curves for trained models (separate window)
+                learning_curve_fig = plot_learning_curves(
+                    train_histories,
+                    title="Training Learning Curves",
+                    fig=learning_curve_fig
+                )
         
         elif choice == "2":
             if not trained_models:
