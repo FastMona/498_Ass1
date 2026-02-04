@@ -227,6 +227,8 @@ def train_model(model, train_loader, test_loader, epochs=100, lr=0.001, verbose=
     # Early stopping parameters
     patience = 5
     best_loss = float('inf')
+    best_model_state = None
+    best_epoch = 0
     patience_counter = 0
     
     for epoch in range(epochs):
@@ -257,6 +259,8 @@ def train_model(model, train_loader, test_loader, epochs=100, lr=0.001, verbose=
         # Early stopping check
         if test_loss < best_loss:
             best_loss = test_loss
+            best_model_state = model.state_dict().copy()
+            best_epoch = epoch
             patience_counter = 0
         else:
             patience_counter += 1
@@ -268,6 +272,12 @@ def train_model(model, train_loader, test_loader, epochs=100, lr=0.001, verbose=
         if patience_counter >= patience:
             if verbose:
                 print(f"Early stopping at epoch {epoch+1} (patience={patience} exceeded)")
+            # Restore best model state
+            if best_model_state is not None:
+                model.load_state_dict(best_model_state)
+            # Truncate loss lists to best epoch
+            train_losses = train_losses[:best_epoch + 1]
+            test_losses = test_losses[:best_epoch + 1]
             break
     
     return model, train_losses, test_losses
