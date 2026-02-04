@@ -350,6 +350,8 @@ if __name__ == "__main__":
     # Create models dictionary
     trained_models = {}
     train_histories = {}
+    plot_fig = None
+    plt.ion()
     
     while True:
         print("\n" + "="*60)
@@ -496,7 +498,11 @@ if __name__ == "__main__":
             print("\n" + "="*60)
             print("DISPLAY DATA PLOT")
             print("="*60)
-            plt.figure(figsize=(8, 8))
+            if plot_fig is None or not plt.fignum_exists(plot_fig.number):
+                plot_fig = plt.figure(figsize=(8, 8))
+            else:
+                plot_fig.clf()
+                plt.figure(plot_fig.number)
             plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
             plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
             plt.xlabel('$x_1$')
@@ -506,7 +512,8 @@ if __name__ == "__main__":
             plt.grid(True, alpha=0.3)
             plt.legend()
             plt.tight_layout()
-            plt.show()
+            plt.show(block=False)
+            plt.pause(0.001)
         
         elif choice == "5":
             print("\nExiting. Goodbye!")
