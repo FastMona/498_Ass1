@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 
 # ============================
@@ -99,9 +100,11 @@ DATA_PARAMS = {
 # ============================
 MLP_ARCHITECTURES = {
     "MLP_0": [],                        # No hidden layers (logistic regression)
-    "MLP_1": [64, 64],              # 2 hidden layers
-    "MLP_2": [64, 64, 64],               # 3 hidden layers
-    "MLP_3": [64, 64, 64, 64],        # 4 hidden layers
+    "MLP_1": [16, 16],                  # 16 node hidden layer
+    "MLP_2": [64, 64],                  # 64 node hidden layers
+    "MLP_3": [128, 64],                # 3 hidden layers
+    "MLP_4": [128, 64, 64 ],                # 4
+    "MLP_5": [128, 128, 64],               
 }
 
 
@@ -362,10 +365,10 @@ if __name__ == "__main__":
         print("2. Batch Test (evaluate on test set)")
         print("3. Single Point Test (classify one point)")
         print("4. Display Data Plot")
-        print("5. Exit")
+        print("0. Exit")
         print("="*60)
         
-        choice = input("Select option (1-5): ").strip()
+        choice = input("Select option (0-4): ").strip()
         
         if choice == "1":
             print("\n" + "="*60)
@@ -396,6 +399,7 @@ if __name__ == "__main__":
             lr_str = input("Learning rate (default 0.001): ").strip()
             lr = float(lr_str) if lr_str else 0.001
             
+            train_rows = []
             for arch_name, hidden_layers in architectures_to_train:
                 print(f"\n{'='*60}")
                 print(f"Training {arch_name} with hidden layers: {hidden_layers}")
@@ -414,6 +418,16 @@ if __name__ == "__main__":
                 
                 final_acc = evaluate_model(trained_model, test_loader)
                 print(f"Final Test Accuracy: {final_acc*100:.2f}%")
+                train_rows.append((arch_name, hidden_layers, final_acc))
+            
+            if train_rows:
+                print("\n" + "="*60)
+                print("TRAINING SUMMARY (Structure & Accuracy)")
+                print("="*60)
+                print(f"{'Model':12s} | {'Structure':24s} | {'Accuracy':>9s}")
+                print("-"*60)
+                for name, structure, acc in train_rows:
+                    print(f"{name:12s} | {str(structure):24s} | {acc*100:8.2f}%")
         
         elif choice == "2":
             if not trained_models:
@@ -461,6 +475,19 @@ if __name__ == "__main__":
                 print("-"*60)
                 for name, structure, acc in test_rows:
                     print(f"{name:12s} | {str(structure):24s} | {acc*100:8.2f}%")
+                
+                # Save to test_results.txt
+                with open('test_results.txt', 'a') as f:
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    f.write(f"\n{'='*60}\n")
+                    f.write(f"Test Results - {timestamp}\n")
+                    f.write(f"{'='*60}\n")
+                    f.write(f"{'Model':12s} | {'Structure':24s} | {'Accuracy':>9s}\n")
+                    f.write(f"{'-'*60}\n")
+                    for name, structure, acc in test_rows:
+                        f.write(f"{name:12s} | {str(structure):24s} | {acc*100:8.2f}%\n")
+                
+                print(f"\nResults saved to test_results.txt")
         
         elif choice == "3":
             if not trained_models:
@@ -528,9 +555,9 @@ if __name__ == "__main__":
             plt.show(block=False)
             plt.pause(0.001)
         
-        elif choice == "5":
+        elif choice == "0":
             print("\nExiting. Goodbye!")
             break
         
         else:
-            print("Invalid option. Please select 1-5.")
+            print("Invalid option. Please select 0-4.")
