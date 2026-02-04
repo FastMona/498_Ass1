@@ -352,7 +352,9 @@ def plot_learning_curves(train_histories, title="Learning Curves", fig=None):
         train_losses = history.get("train_losses", [])
         if train_losses:
             epochs = range(1, len(train_losses) + 1)
-            plt.plot(epochs, train_losses, label=f"{model_name} Train")
+            # Get architecture from MLP_ARCHITECTURES dictionary
+            arch = MLP_ARCHITECTURES.get(model_name, [])
+            plt.plot(epochs, train_losses, label=f"{arch}")
 
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
