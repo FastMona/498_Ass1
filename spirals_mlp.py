@@ -100,11 +100,11 @@ DATA_PARAMS = {
 # ============================
 MLP_ARCHITECTURES = {
     "MLP_0": [],                        # No hidden layers (logistic regression)
-    "MLP_1": [16, 16],                  # 16 node hidden layer
-    "MLP_2": [64, 64],                  # 64 node hidden layers
-    "MLP_3": [128, 64],                # 3 hidden layers
-    "MLP_4": [128, 64, 64 ],                # 4
-    "MLP_5": [128, 128, 64],               
+    "MLP_1": [8],                  # 16 node hidden layer
+    "MLP_2": [8, 8],                  # 64 node hidden layers
+    "MLP_3": [16],                # 3 hidden layers
+    "MLP_4": [16, 16 ],                # 4
+    "MLP_5": [16, 16, 16],                # 5
 }
 
 
