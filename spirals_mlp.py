@@ -71,6 +71,60 @@ def _plot_interlocked_region_boundaries(
     ax.contour(xx, yy, c2_mask, levels=[0.5], colors='k', linewidths=3)
 
 
+def _plot_both_sampling_methods(rnd_data, ctr_data, r_inner, r_outer, shift):
+    """Plot side-by-side comparison of RND and CTR sampling methods."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+    
+    # Extract data for RND
+    x_c1_rnd = [p[0] for p in rnd_data if p[2] == 0]
+    y_c1_rnd = [p[1] for p in rnd_data if p[2] == 0]
+    x_c2_rnd = [p[0] for p in rnd_data if p[2] == 1]
+    y_c2_rnd = [p[1] for p in rnd_data if p[2] == 1]
+    
+    # Extract data for CTR
+    x_c1_ctr = [p[0] for p in ctr_data if p[2] == 0]
+    y_c1_ctr = [p[1] for p in ctr_data if p[2] == 0]
+    x_c2_ctr = [p[0] for p in ctr_data if p[2] == 1]
+    y_c2_ctr = [p[1] for p in ctr_data if p[2] == 1]
+    
+    # Create predicates for boundaries
+    def c1_pred(x, y):
+        return _c1_predicate(x, y, r_inner, r_outer, shift)
+    def c2_pred(x, y):
+        return _c2_predicate(x, y, r_inner, r_outer, shift)
+    
+    bounds = (-r_outer - 0.5, r_outer + 0.5, -shift - r_outer - 0.5, r_outer + 0.5)
+    
+    # Plot RND (left subplot)
+    ax1.plot(x_c1_rnd, y_c1_rnd, '.', label='C1', alpha=0.6, markersize=3)
+    ax1.plot(x_c2_rnd, y_c2_rnd, '.', label='C2', alpha=0.6, markersize=3)
+    _plot_interlocked_region_boundaries(
+        ax1, c1_pred, c2_pred, bounds, remove_x0_ranges=[(0, r_inner)]
+    )
+    ax1.set_xlabel('$x_1$')
+    ax1.set_ylabel('$x_2$')
+    ax1.set_title('RND (Uniform Random Sampling)')
+    ax1.set_aspect('equal', 'box')
+    ax1.grid(True, alpha=0.3)
+    ax1.legend()
+    
+    # Plot CTR (right subplot)
+    ax2.plot(x_c1_ctr, y_c1_ctr, '.', label='C1', alpha=0.6, markersize=3)
+    ax2.plot(x_c2_ctr, y_c2_ctr, '.', label='C2', alpha=0.6, markersize=3)
+    _plot_interlocked_region_boundaries(
+        ax2, c1_pred, c2_pred, bounds, remove_x0_ranges=[(0, r_inner)]
+    )
+    ax2.set_xlabel('$x_1$')
+    ax2.set_ylabel('$x_2$')
+    ax2.set_title('CTR (Center-Weighted Sampling at (0, -0.5))')
+    ax2.set_aspect('equal', 'box')
+    ax2.grid(True, alpha=0.3)
+    ax2.legend()
+    
+    plt.tight_layout()
+    plt.show()
+
+
 def generate_intertwined_spirals(
     n=600,
     r_inner=1.0,
@@ -79,7 +133,8 @@ def generate_intertwined_spirals(
     noise_std=0.0,
     seed=None,
     include_inner_caps=False,
-    plot=False
+    plot=False,
+    sampling_method="RND"
 ):
     """
     Generate two interlocked regions that form symmetric spiraling shapes.
@@ -109,12 +164,16 @@ def generate_intertwined_spirals(
         Unused legacy parameter (default False)
     plot : bool
         If True, plot the regions with boundaries (default False)
+    sampling_method : str
+        "RND" for uniform random sampling
+        "CTR" for center-weighted (shotgun) sampling around (0, -0.5)
+        "BOTH" to generate both and show side-by-side plots
 
     Returns:
     --------
-    list of tuples
-        2n tuples total: n for C1 (label 0) and n for C2 (label 1)
-        Each tuple: (x, y, label)
+    list of tuples or tuple of two lists
+        If sampling_method is "RND" or "CTR": list of 2n tuples (x, y, label)
+        If sampling_method is "BOTH": tuple of (rnd_data, ctr_data)
     """
     rng = np.random.default_rng(seed)
 
@@ -163,9 +222,87 @@ def generate_intertwined_spirals(
         
         return np.concatenate([x_ann, x_disk]), np.concatenate([y_ann, y_disk])
 
-    # Sampling using proper uniform distributions
-    x_left, y_left = _sample_c1(n)
-    x_right, y_right = _sample_c2(n)
+    # Center-weighted (shotgun) sampling functions
+    def _sample_c1_centered(n_samples, center_x=0, center_y=-0.5, sigma=0.8):
+        """Sample C1 using center-weighted Gaussian distribution with rejection sampling."""
+        x_samples, y_samples = [], []
+        max_attempts = n_samples * 100  # Safety limit
+        attempts = 0
+        
+        while len(x_samples) < n_samples and attempts < max_attempts:
+            # Generate candidates from 2D Gaussian centered at (center_x, center_y)
+            batch_size = (n_samples - len(x_samples)) * 3
+            x_cand = rng.normal(center_x, sigma, batch_size)
+            y_cand = rng.normal(center_y, sigma, batch_size)
+            
+            # Keep only points that fall within C1 region
+            mask = c1_predicate(x_cand, y_cand)
+            x_samples.extend(x_cand[mask])
+            y_samples.extend(y_cand[mask])
+            attempts += batch_size
+        
+        return np.array(x_samples[:n_samples]), np.array(y_samples[:n_samples])
+
+    def _sample_c2_centered(n_samples, center_x=0, center_y=-0.5, sigma=0.8):
+        """Sample C2 using center-weighted Gaussian distribution with rejection sampling."""
+        x_samples, y_samples = [], []
+        max_attempts = n_samples * 100  # Safety limit
+        attempts = 0
+        
+        while len(x_samples) < n_samples and attempts < max_attempts:
+            # Generate candidates from 2D Gaussian centered at (center_x, center_y)
+            batch_size = (n_samples - len(x_samples)) * 3
+            x_cand = rng.normal(center_x, sigma, batch_size)
+            y_cand = rng.normal(center_y, sigma, batch_size)
+            
+            # Keep only points that fall within C2 region
+            mask = c2_predicate(x_cand, y_cand)
+            x_samples.extend(x_cand[mask])
+            y_samples.extend(y_cand[mask])
+            attempts += batch_size
+        
+        return np.array(x_samples[:n_samples]), np.array(y_samples[:n_samples])
+
+    # Choose sampling method
+    if sampling_method == "BOTH":
+        # Generate both datasets
+        # Random sampling
+        x_left_rnd, y_left_rnd = _sample_c1(n)
+        x_right_rnd, y_right_rnd = _sample_c2(n)
+        
+        # Center-weighted sampling
+        x_left_ctr, y_left_ctr = _sample_c1_centered(n)
+        x_right_ctr, y_right_ctr = _sample_c2_centered(n)
+        
+        if noise_std > 0:
+            x_left_rnd += noise_std * rng.standard_normal(n)
+            y_left_rnd += noise_std * rng.standard_normal(n)
+            x_right_rnd += noise_std * rng.standard_normal(n)
+            y_right_rnd += noise_std * rng.standard_normal(n)
+            
+            x_left_ctr += noise_std * rng.standard_normal(n)
+            y_left_ctr += noise_std * rng.standard_normal(n)
+            x_right_ctr += noise_std * rng.standard_normal(n)
+            y_right_ctr += noise_std * rng.standard_normal(n)
+        
+        rnd_data = [(x_left_rnd[i], y_left_rnd[i], 0) for i in range(n)] + \
+                   [(x_right_rnd[i], y_right_rnd[i], 1) for i in range(n)]
+        ctr_data = [(x_left_ctr[i], y_left_ctr[i], 0) for i in range(n)] + \
+                   [(x_right_ctr[i], y_right_ctr[i], 1) for i in range(n)]
+        
+        if plot:
+            _plot_both_sampling_methods(rnd_data, ctr_data, r_inner, r_outer, shift)
+        
+        return rnd_data, ctr_data
+    
+    elif sampling_method == "CTR":
+        # Center-weighted sampling only
+        x_left, y_left = _sample_c1_centered(n)
+        x_right, y_right = _sample_c2_centered(n)
+    else:  # "RND" or default
+        # Uniform random sampling
+        x_left, y_left = _sample_c1(n)
+        x_right, y_right = _sample_c2(n)
 
     if noise_std > 0:
         x_left += noise_std * rng.standard_normal(n)
@@ -204,13 +341,14 @@ def generate_intertwined_spirals(
 # Data Generation Configuration (easily modifiable)
 # ============================
 DATA_PARAMS = {
-    "n": 100,            # Number of points per region
+    "n": 1000,            # Number of points per region
     "r_inner": 1.0,        # Inner radius
     "r_outer": 2.0,        # Outer radius
     "shift": 1.0,          # Downward shift of right half
     "noise_std": 0.0,      # Gaussian noise (0 for clean boundaries)
     "seed": 7,
     "include_inner_caps": False,  # No special fill
+    "sampling_method": "BOTH",  # "RND" (uniform random), "CTR" (center-weighted), or "BOTH" (show side-by-side)
 }
 
 # ============================
@@ -502,11 +640,30 @@ if __name__ == "__main__":
     
     # Generate spiral data
     print("\nGenerating interlocked region data...")
-    spirals = generate_intertwined_spirals(**DATA_PARAMS)
+    sampling_method = DATA_PARAMS.get("sampling_method", "RND")
+    
+    if sampling_method == "BOTH":
+        # Generate both datasets but use RND for training
+        result = generate_intertwined_spirals(
+            n=DATA_PARAMS["n"],
+            r_inner=DATA_PARAMS["r_inner"],
+            r_outer=DATA_PARAMS["r_outer"],
+            shift=DATA_PARAMS["shift"],
+            noise_std=DATA_PARAMS["noise_std"],
+            seed=DATA_PARAMS["seed"],
+            sampling_method="BOTH",
+            plot=False
+        )
+        spirals = result[0]  # Use RND data for training
+        print(f"Generated both RND and CTR datasets for comparison")
+    else:
+        spirals = generate_intertwined_spirals(**DATA_PARAMS)
+    
     total_points = len(spirals)
     points_per_spiral = DATA_PARAMS["n"]
     print(f"Total points: {total_points} ({points_per_spiral} per spiral)")
     print(f"Data parameters: {DATA_PARAMS}")
+    print(f"Sampling method: {sampling_method}")
     
     # Extract data for plotting
     x_data = np.array([[x, y] for x, y, _ in spirals])
@@ -712,42 +869,50 @@ if __name__ == "__main__":
             print("\n" + "="*60)
             print("DISPLAY DATA PLOT")
             print("="*60)
-            if plot_fig is None or not plt.fignum_exists(plot_fig.number):
-                plot_fig = plt.figure(figsize=(8, 8))
+            
+            # Check if we have both sampling methods
+            if DATA_PARAMS.get("sampling_method") == "BOTH":
+                # Regenerate with plot=True to show side-by-side
+                _ = generate_intertwined_spirals(**{**DATA_PARAMS, "plot": True})
             else:
-                plot_fig.clf()
-                plt.figure(plot_fig.number)
-            plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
-            plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
-            # Define region predicates using helper functions
-            def _c1_pred(x, y):
-                return _c1_predicate(x, y, DATA_PARAMS["r_inner"], DATA_PARAMS["r_outer"], DATA_PARAMS["shift"])
+                # Single plot for RND or CTR
+                if plot_fig is None or not plt.fignum_exists(plot_fig.number):
+                    plot_fig = plt.figure(figsize=(8, 8))
+                else:
+                    plot_fig.clf()
+                    plt.figure(plot_fig.number)
+                plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
+                plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
+                # Define region predicates using helper functions
+                def _c1_pred(x, y):
+                    return _c1_predicate(x, y, DATA_PARAMS["r_inner"], DATA_PARAMS["r_outer"], DATA_PARAMS["shift"])
 
-            def _c2_pred(x, y):
-                return _c2_predicate(x, y, DATA_PARAMS["r_inner"], DATA_PARAMS["r_outer"], DATA_PARAMS["shift"])
+                def _c2_pred(x, y):
+                    return _c2_predicate(x, y, DATA_PARAMS["r_inner"], DATA_PARAMS["r_outer"], DATA_PARAMS["shift"])
 
-            bounds = (
-                -DATA_PARAMS["r_outer"] - 0.5,
-                DATA_PARAMS["r_outer"] + 0.5,
-                -DATA_PARAMS["shift"] - DATA_PARAMS["r_outer"] - 0.5,
-                DATA_PARAMS["r_outer"] + 0.5,
-            )
-            _plot_interlocked_region_boundaries(
-                plt.gca(),
-                _c1_pred,
-                _c2_pred,
-                bounds,
-                remove_x0_ranges=[(0, DATA_PARAMS["r_inner"])],
-            )
-            plt.xlabel('$x_1$')
-            plt.ylabel('$x_2$')
-            plt.title('Interlocked Annulus Regions Dataset')
-            plt.axis('equal')
-            plt.grid(True, alpha=0.3)
-            plt.legend()
-            plt.tight_layout()
-            plt.show(block=False)
-            plt.pause(0.001)
+                bounds = (
+                    -DATA_PARAMS["r_outer"] - 0.5,
+                    DATA_PARAMS["r_outer"] + 0.5,
+                    -DATA_PARAMS["shift"] - DATA_PARAMS["r_outer"] - 0.5,
+                    DATA_PARAMS["r_outer"] + 0.5,
+                )
+                _plot_interlocked_region_boundaries(
+                    plt.gca(),
+                    _c1_pred,
+                    _c2_pred,
+                    bounds,
+                    remove_x0_ranges=[(0, DATA_PARAMS["r_inner"])],
+                )
+                method_name = DATA_PARAMS.get("sampling_method", "RND")
+                plt.xlabel('$x_1$')
+                plt.ylabel('$x_2$')
+                plt.title(f'Interlocked Annulus Regions Dataset ({method_name})')
+                plt.axis('equal')
+                plt.grid(True, alpha=0.3)
+                plt.legend()
+                plt.tight_layout()
+                plt.show(block=False)
+                plt.pause(0.001)
         
         elif choice == "0":
             print("\nExiting. Goodbye!")
