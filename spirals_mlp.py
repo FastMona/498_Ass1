@@ -8,80 +8,195 @@ from datetime import datetime
 
 
 # ============================
+# Region Definitions
+# ============================
+def _c1_predicate(x, y, r_inner, r_outer, shift):
+    """C1: Left half-annulus + right half disk centered at (0, -shift)."""
+    r2_origin = x ** 2 + y ** 2
+    r2_shifted = x ** 2 + (y + shift) ** 2
+    in_left_annulus = (x <= 0) & (r2_origin >= r_inner ** 2) & (r2_origin <= r_outer ** 2)
+    in_right_inner_disk = (x >= 0) & (r2_shifted <= r_inner ** 2)
+    return in_left_annulus | in_right_inner_disk
+
+
+def _c2_predicate(x, y, r_inner, r_outer, shift):
+    """C2: Right half-annulus centered at (0, -shift) + left half disk at origin."""
+    r2_origin = x ** 2 + y ** 2
+    r2_shifted = x ** 2 + (y + shift) ** 2
+    in_right_annulus = (x >= 0) & (r2_shifted >= r_inner ** 2) & (r2_shifted <= r_outer ** 2)
+    in_left_inner_disk = (x <= 0) & (r2_origin <= r_inner ** 2)
+    return in_right_annulus | in_left_inner_disk
+
+
+# ============================
 # Data Generation Function
 # ============================
-def generate_intertwined_spirals(n=600, turns=1.25, a=0.32, noise_std=0.08, plot=False):
+def _plot_interlocked_region_boundaries(
+    ax,
+    c1_predicate,
+    c2_predicate,
+    bounds,
+    grid_res=400,
+    remove_x0_ranges=None
+):
+    xmin, xmax, ymin, ymax = bounds
+    xs = np.linspace(xmin, xmax, grid_res)
+    ys = np.linspace(ymin, ymax, grid_res)
+    xx, yy = np.meshgrid(xs, ys)
+
+    c1_mask = c1_predicate(xx, yy).astype(float)
+    c2_mask = c2_predicate(xx, yy).astype(float)
+
+    # Create combined region map for shading (before masking)
+    region_map = np.zeros_like(xx)
+    region_map[c1_mask > 0.5] = 1  # C1
+    region_map[c2_mask > 0.5] = 2  # C2
+
+    # Shade regions with light colors
+    from matplotlib.colors import ListedColormap
+    colors_list = ['white', '#CCE5FF', '#FFE5CC']  # C3 (white), C1 (light blue), C2 (light orange)
+    cmap = ListedColormap(colors_list)
+    ax.contourf(xx, yy, region_map, levels=[0, 0.5, 1.5, 2.5], cmap=cmap, alpha=0.7)
+
+    # Apply masking only for boundary lines
+    if remove_x0_ranges:
+        dx = xs[1] - xs[0]
+        near_x0 = np.abs(xx) <= (1.5 * dx)
+        for y_min, y_max in remove_x0_ranges:
+            in_range = (yy >= y_min) & (yy <= y_max)
+            c1_mask[near_x0 & in_range] = np.nan
+            c2_mask[near_x0 & in_range] = np.nan
+
+    ax.contour(xx, yy, c1_mask, levels=[0.5], colors='k', linewidths=3)
+    ax.contour(xx, yy, c2_mask, levels=[0.5], colors='k', linewidths=3)
+
+
+def generate_intertwined_spirals(
+    n=600,
+    r_inner=1.0,
+    r_outer=2.0,
+    shift=1.0,
+    noise_std=0.0,
+    seed=None,
+    include_inner_caps=False,
+    plot=False
+):
     """
-    Generate two intertwined spirals.
-    
+    Generate two interlocked regions that form symmetric spiraling shapes.
+
+    Region C1 (blue): Left half-annulus [r_inner, r_outer] centered at origin
+                      + right half disk [0, r_inner] centered at (0, -shift)
+    Region C2 (orange): Right half-annulus [r_inner, r_outer] centered at (0, -shift)
+                        + left half disk [0, r_inner] centered at origin
+
+    The regions interlock symmetrically around the point (0, -shift/2).
+
     Parameters:
     -----------
     n : int
-        Number of points per spiral (default 600)
-    turns : float
-        Number of spiral turns (default 1.25)
-    a : float
-        Radial scaling factor (default 0.32)
+        Number of points per region (default 600)
+    r_inner : float
+        Inner radius of annuli (default 1.0)
+    r_outer : float
+        Outer radius of annuli (default 2.0)
+    shift : float
+        Downward shift of right half regions (default 1.0)
     noise_std : float
-        Standard deviation of Gaussian noise (default 0.08)
+        Standard deviation of Gaussian noise (default 0.0)
+    seed : int or None
+        Random seed for reproducibility (default None)
+    include_inner_caps : bool
+        Unused legacy parameter (default False)
     plot : bool
-        If True, plot the spirals (default False)
-    
+        If True, plot the regions with boundaries (default False)
+
     Returns:
     --------
     list of tuples
-        1200 tuples total: 600 for C1 (labeled 0) and 600 for C2 (labeled 1)
+        2n tuples total: n for C1 (label 0) and n for C2 (label 1)
         Each tuple: (x, y, label)
     """
-    
-    # Parameter along spiral
-    theta = np.linspace(0, -2*np.pi*turns, n)
-    
-    # Radius as function of angle
-    r = a * theta
-    
-    # Spiral C1
-    x1_c1 = r * np.cos(theta)
-    y1_c1 = r * np.sin(theta)
-    
-    # Spiral C2 (phase-shifted by pi)
-    x1_c2 = r * np.cos(theta + np.pi)
-    y1_c2 = r * np.sin(theta + np.pi)
-    
-    # Add noise
-    x1_c1 += noise_std * np.random.randn(n)
-    y1_c1 += noise_std * np.random.randn(n)
-    x1_c2 += noise_std * np.random.randn(n)
-    y1_c2 += noise_std * np.random.randn(n)
-    
-    # Center whole figure at (0, -0.5)
-    y1_c1 -= 0.5
-    y1_c2 -= 0.5
-    
-    # Offset spirals horizontally so inner tips don't touch border at x=0
-    x1_c1 -= 0.15  # shift C1 left
-    x1_c2 += 0.15  # shift C2 right
-    
-    # Create tuples: (x, y, label)
-    c1_tuples = [(x1_c1[i], y1_c1[i], 0) for i in range(n)]
-    c2_tuples = [(x1_c2[i], y1_c2[i], 1) for i in range(n)]
-    
-    # Combine and return
+    rng = np.random.default_rng(seed)
+
+    # Use predicate helper functions with partial application
+    def c1_predicate(x, y):
+        return _c1_predicate(x, y, r_inner, r_outer, shift)
+
+    def c2_predicate(x, y):
+        return _c2_predicate(x, y, r_inner, r_outer, shift)
+
+    def _sample_half_annulus(n_samples, theta_min, theta_max, y_shift=0):
+        """Sample uniformly from a half-annulus in polar coordinates."""
+        theta = rng.uniform(theta_min, theta_max, n_samples)
+        r = np.sqrt(rng.uniform(r_inner ** 2, r_outer ** 2, n_samples))
+        return r * np.cos(theta), r * np.sin(theta) + y_shift
+
+    def _sample_half_disk(n_samples, theta_min, theta_max, y_shift=0):
+        """Sample uniformly from a half-disk in polar coordinates."""
+        theta = rng.uniform(theta_min, theta_max, n_samples)
+        r = np.sqrt(rng.uniform(0, r_inner ** 2, n_samples))
+        return r * np.cos(theta), r * np.sin(theta) + y_shift
+
+    def _sample_c1(n_samples):
+        """Sample C1: left annulus + right half disk at (0, -shift)."""
+        # Proportional split by area
+        area_annulus = np.pi * (r_outer ** 2 - r_inner ** 2) / 2
+        area_disk = np.pi * r_inner ** 2 / 2
+        n_annulus = int(n_samples * area_annulus / (area_annulus + area_disk))
+        n_disk = n_samples - n_annulus
+        
+        x_ann, y_ann = _sample_half_annulus(n_annulus, np.pi / 2, 3 * np.pi / 2)
+        x_disk, y_disk = _sample_half_disk(n_disk, -np.pi / 2, np.pi / 2, -shift)
+        
+        return np.concatenate([x_ann, x_disk]), np.concatenate([y_ann, y_disk])
+
+    def _sample_c2(n_samples):
+        """Sample C2: right annulus at (0, -shift) + left half disk at origin."""
+        # Proportional split by area
+        area_annulus = np.pi * (r_outer ** 2 - r_inner ** 2) / 2
+        area_disk = np.pi * r_inner ** 2 / 2
+        n_annulus = int(n_samples * area_annulus / (area_annulus + area_disk))
+        n_disk = n_samples - n_annulus
+        
+        x_ann, y_ann = _sample_half_annulus(n_annulus, -np.pi / 2, np.pi / 2, -shift)
+        x_disk, y_disk = _sample_half_disk(n_disk, np.pi / 2, 3 * np.pi / 2)
+        
+        return np.concatenate([x_ann, x_disk]), np.concatenate([y_ann, y_disk])
+
+    # Sampling using proper uniform distributions
+    x_left, y_left = _sample_c1(n)
+    x_right, y_right = _sample_c2(n)
+
+    if noise_std > 0:
+        x_left += noise_std * rng.standard_normal(n)
+        y_left += noise_std * rng.standard_normal(n)
+        x_right += noise_std * rng.standard_normal(n)
+        y_right += noise_std * rng.standard_normal(n)
+
+    c1_tuples = [(x_left[i], y_left[i], 0) for i in range(n)]
+    c2_tuples = [(x_right[i], y_right[i], 1) for i in range(n)]
     data = c1_tuples + c2_tuples
-    
-    # Optional: plot
+
     if plot:
-        plt.figure(figsize=(8, 8))
-        plt.plot(x1_c1, y1_c1, '.', label='C1')
-        plt.plot(x1_c2, y1_c2, '.', label='C2')
-        plt.xlabel('$x_1$')
-        plt.ylabel('$x_2$')
-        plt.title('Two Intertwined Spirals')
-        plt.axis('equal')
-        plt.grid(True, alpha=0.3)
-        plt.legend()
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.plot(x_left, y_left, '.', label='C1', alpha=0.6)
+        ax.plot(x_right, y_right, '.', label='C2', alpha=0.6)
+        bounds = (-r_outer - 0.5, r_outer + 0.5, -shift - r_outer - 0.5, r_outer + 0.5)
+        _plot_interlocked_region_boundaries(
+            ax,
+            c1_predicate,
+            c2_predicate,
+            bounds,
+            remove_x0_ranges=[(0, r_inner)]
+        )
+        ax.set_xlabel('$x_1$')
+        ax.set_ylabel('$x_2$')
+        ax.set_title('Interlocked Annulus Regions')
+        ax.set_aspect('equal', 'box')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
         plt.show()
-    
+
     return data
 
 
@@ -89,10 +204,13 @@ def generate_intertwined_spirals(n=600, turns=1.25, a=0.32, noise_std=0.08, plot
 # Data Generation Configuration (easily modifiable)
 # ============================
 DATA_PARAMS = {
-    "n": 10000,         # Number of points per spiral
-    "turns": 1.25,         # Number of spiral turns
-    "a": 0.30,            # Radial scaling factor
-    "noise_std": 0.1, # Standard deviation of Gaussian noise
+    "n": 100,            # Number of points per region
+    "r_inner": 1.0,        # Inner radius
+    "r_outer": 2.0,        # Outer radius
+    "shift": 1.0,          # Downward shift of right half
+    "noise_std": 0.0,      # Gaussian noise (0 for clean boundaries)
+    "seed": 7,
+    "include_inner_caps": False,  # No special fill
 }
 
 # ============================
@@ -383,7 +501,7 @@ if __name__ == "__main__":
     print("="*60)
     
     # Generate spiral data
-    print("\nGenerating spiral data...")
+    print("\nGenerating interlocked region data...")
     spirals = generate_intertwined_spirals(**DATA_PARAMS)
     total_points = len(spirals)
     points_per_spiral = DATA_PARAMS["n"]
@@ -601,9 +719,29 @@ if __name__ == "__main__":
                 plt.figure(plot_fig.number)
             plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
             plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
+            # Define region predicates using helper functions
+            def _c1_pred(x, y):
+                return _c1_predicate(x, y, DATA_PARAMS["r_inner"], DATA_PARAMS["r_outer"], DATA_PARAMS["shift"])
+
+            def _c2_pred(x, y):
+                return _c2_predicate(x, y, DATA_PARAMS["r_inner"], DATA_PARAMS["r_outer"], DATA_PARAMS["shift"])
+
+            bounds = (
+                -DATA_PARAMS["r_outer"] - 0.5,
+                DATA_PARAMS["r_outer"] + 0.5,
+                -DATA_PARAMS["shift"] - DATA_PARAMS["r_outer"] - 0.5,
+                DATA_PARAMS["r_outer"] + 0.5,
+            )
+            _plot_interlocked_region_boundaries(
+                plt.gca(),
+                _c1_pred,
+                _c2_pred,
+                bounds,
+                remove_x0_ranges=[(0, DATA_PARAMS["r_inner"])],
+            )
             plt.xlabel('$x_1$')
             plt.ylabel('$x_2$')
-            plt.title('Two Intertwined Spirals Dataset')
+            plt.title('Interlocked Annulus Regions Dataset')
             plt.axis('equal')
             plt.grid(True, alpha=0.3)
             plt.legend()
