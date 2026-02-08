@@ -1,8 +1,15 @@
 import matplotlib.pyplot as plt
+import torch
 from pathlib import Path
 from datetime import datetime
 
-from data import DATA_PARAMS, generate_intertwined_spirals, plot_dataset, plot_three_datasets
+from data import (
+    DATA_PARAMS,
+    generate_intertwined_spirals,
+    plot_dataset,
+    plot_three_datasets,
+    plot_three_datasets_with_fp_fn,
+)
 from MLPx6 import (
     MLP,
     MLP_ARCHITECTURES,
@@ -59,6 +66,35 @@ def _init_dataloaders(dataset_storage, batch_size=32):
     return train_loaders, val_loaders, test_loaders, trained_models, train_histories
 
 
+def _collect_fp_fn_points(model, test_loader):
+    model.eval()
+    fp_points = []
+    fn_points = []
+    with torch.no_grad():
+        for x_batch, y_batch in test_loader:
+            outputs = model(x_batch)
+            predicted = (outputs > 0.5).float()
+            fp_mask = (predicted == 1) & (y_batch == 0)
+            fn_mask = (predicted == 0) & (y_batch == 1)
+
+            if fp_mask.any():
+                fp_xy = x_batch[fp_mask.squeeze()]
+                fp_points.extend([(float(x), float(y)) for x, y in fp_xy.tolist()])
+            if fn_mask.any():
+                fn_xy = x_batch[fn_mask.squeeze()]
+                fn_points.extend([(float(x), float(y)) for x, y in fn_xy.tolist()])
+    return fp_points, fn_points
+
+
+def _print_point_list(label, points, limit):
+    print(f"{label} (showing {min(limit, len(points))} of {len(points)}):")
+    if not points:
+        print("  (none)")
+        return
+    for x, y in points[:limit]:
+        print(f"  ({x:.4f}, {y:.4f})")
+
+
 def main():
     print("="*60)
     print("INTERTWINED SPIRALS CLASSIFICATION WITH MLPs")
@@ -94,10 +130,11 @@ def main():
         print("4. Single Point Test (classify one point)")
         if len(dataset_storage) > 1:
             print("5. Cross-Dataset Comparison")
+        print("6. List/Display FP/FN Points (best models)")
         print("9. Cleanup")
         print("="*60)
 
-        max_option = "9" if len(dataset_storage) > 1 else "4"
+        max_option = "9" if len(dataset_storage) > 1 else "6"
         choice = input(f"Select option (0-{max_option}): ").strip()
 
         if choice == "1":
@@ -191,10 +228,20 @@ def main():
                         "test_losses": test_losses
                     }
 
+                    total_params = sum(param.numel() for param in trained_model.parameters())
+                    print(f"    Total parameters saved: {total_params}")
                     tn, fp, fn, tp = confusion_counts(trained_model, test_loaders[ds_name])
                     print("    Confusion (test, best model):")
                     print(f"      TN: {tn:5d}  FP: {fp:5d}")
                     print(f"      FN: {fn:5d}  TP: {tp:5d}")
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+                    print(
+                        f"      Precision: {precision:.3f}  Recall: {recall:.3f}  "
+                        f"Specificity: {specificity:.3f}  F1: {f1:.3f}"
+                    )
                     final_acc = evaluate_model(trained_model, test_loaders[ds_name])
                     all_results[ds_name][arch_name] = final_acc
                     print(f"    Test Accuracy: {final_acc*100:.2f}%")
@@ -277,6 +324,16 @@ def main():
                     for ds_name in dataset_storage.keys():
                         acc = all_results[ds_name][arch_name]
                         f.write(f"{acc*100:9.2f}% | ")
+                    f.write("\n")
+                    f.write(f"{'P/R/S/F1':24s} | ")
+                    for ds_name in dataset_storage.keys():
+                        model = trained_models[ds_name][arch_name]
+                        tn, fp, fn, tp = confusion_counts(model, test_loaders[ds_name])
+                        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+                        f.write(f"{precision:.3f}/{recall:.3f}/{specificity:.3f}/{f1:.3f} | ")
                     f.write("\n")
 
             print("\nResults saved to test_results.txt")
@@ -408,6 +465,63 @@ def main():
 
             print("\nResults saved to test_results.txt")
 
+        elif choice == "6":
+            if not any(any(models.values()) for models in trained_models.values()):
+                print("\nNo trained models yet. Please train models first (option 3).")
+                continue
+
+            if not dataset_storage:
+                print("\nNo datasets; recreate datasets first (option 1).")
+                continue
+
+            limit_str = input("Max points to list per category (default 20): ").strip()
+            limit = 20
+            if limit_str:
+                try:
+                    limit = max(1, int(limit_str))
+                except ValueError:
+                    limit = 20
+
+            fp_fn_by_dataset = {}
+
+            print("\n" + "="*60)
+            print("FP/FN POINTS FOR BEST MODEL PER DATASET")
+            print("="*60)
+
+            for ds_name in dataset_storage.keys():
+                ds_models = trained_models.get(ds_name, {})
+                if not ds_models:
+                    continue
+
+                best_model_name = None
+                best_acc = -1.0
+                for model_name, model in ds_models.items():
+                    acc = evaluate_model(model, test_loaders[ds_name])
+                    if acc > best_acc:
+                        best_acc = acc
+                        best_model_name = model_name
+
+                if best_model_name is None:
+                    continue
+
+                model = ds_models[best_model_name]
+                fp_points, fn_points = _collect_fp_fn_points(model, test_loaders[ds_name])
+                arch = MLP_ARCHITECTURES.get(best_model_name, [])
+                fp_fn_by_dataset[ds_name] = {
+                    "fp": fp_points,
+                    "fn": fn_points,
+                    "model_name": best_model_name,
+                    "acc": best_acc,
+                }
+
+                print(f"\nDataset: {ds_name}")
+                print(f"Best model: {best_model_name} {arch} | acc: {best_acc*100:.2f}%")
+                _print_point_list("FP (pred C2, true C1)", fp_points, limit)
+                _print_point_list("FN (pred C1, true C2)", fn_points, limit)
+
+            if fp_fn_by_dataset:
+                plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset)
+
         elif choice == "9":
             print("\n" + "="*60)
             print("CLEANUP")
@@ -452,7 +566,7 @@ def main():
                 print("test_results.txt not found; nothing to trim.")
 
         else:
-            max_valid = 9 if len(dataset_storage) > 1 else 4
+            max_valid = 9 if len(dataset_storage) > 1 else 6
             print(f"Invalid option. Please select 0-{max_valid}.")
 
 

@@ -53,6 +53,10 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data):
     """Plot side-by-side comparison of RND, CTR, and EDGE sampling methods."""
     _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
 
+    rnd_count = len(rnd_data)
+    ctr_count = len(ctr_data)
+    edge_count = len(edge_data)
+
     # Extract data for RND
     x_c1_rnd = [p[0] for p in rnd_data if p[2] == 0]
     y_c1_rnd = [p[1] for p in rnd_data if p[2] == 0]
@@ -81,7 +85,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data):
     )
     ax1.set_xlabel('$x_1$')
     ax1.set_ylabel('$x_2$')
-    ax1.set_title('RND (Uniform Random Sampling)')
+    ax1.set_title(f'RND (Uniform Random Sampling) - {rnd_count} points')
     ax1.set_aspect('equal', 'box')
     ax1.grid(True, alpha=0.3)
     ax1.legend()
@@ -94,7 +98,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data):
     )
     ax2.set_xlabel('$x_1$')
     ax2.set_ylabel('$x_2$')
-    ax2.set_title('CTR (Center-Weighted Sampling at (0, -0.5))')
+    ax2.set_title(f'CTR (Center-Weighted Sampling at (0, -0.5)) - {ctr_count} points')
     ax2.set_aspect('equal', 'box')
     ax2.grid(True, alpha=0.3)
     ax2.legend()
@@ -107,13 +111,69 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data):
     )
     ax3.set_xlabel('$x_1$')
     ax3.set_ylabel('$x_2$')
-    ax3.set_title('EDGE (Boundary-Attracted Sampling)')
+    ax3.set_title(f'EDGE (Boundary-Attracted Sampling) - {edge_count} points')
     ax3.set_aspect('equal', 'box')
     ax3.grid(True, alpha=0.3)
     ax3.legend()
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset):
+    """Plot datasets with FP/FN points overlaid in a new window."""
+    _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+
+    panels = [
+        ("RND", dataset_storage.get("RND"), ax1),
+        ("CTR", dataset_storage.get("CTR"), ax2),
+        ("EDGE", dataset_storage.get("EDGE"), ax3),
+    ]
+
+    bounds = (-2.5, 2.5, -3.5, 2.5)
+
+    for ds_name, data, ax in panels:
+        if not data:
+            ax.set_axis_off()
+            continue
+
+        x_c1 = [p[0] for p in data if p[2] == 0]
+        y_c1 = [p[1] for p in data if p[2] == 0]
+        x_c2 = [p[0] for p in data if p[2] == 1]
+        y_c2 = [p[1] for p in data if p[2] == 1]
+
+        ax.plot(x_c1, y_c1, '.', label='C1', alpha=0.6, markersize=3)
+        ax.plot(x_c2, y_c2, '.', label='C2', alpha=0.6, markersize=3)
+        _plot_interlocked_region_boundaries(
+            ax, bounds, remove_x0_ranges=[(-1, 0), (1, 2)]
+        )
+
+        fp_fn = fp_fn_by_dataset.get(ds_name, {})
+        fp_points = fp_fn.get("fp", [])
+        fn_points = fp_fn.get("fn", [])
+        if fp_points:
+            fp_x, fp_y = zip(*fp_points)
+            ax.scatter(fp_x, fp_y, s=30, marker='o', c='#2ECC71', label='FP')
+        if fn_points:
+            fn_x, fn_y = zip(*fn_points)
+            ax.scatter(fn_x, fn_y, s=30, marker='o', c='#E74C3C', label='FN')
+
+        model_name = fp_fn.get("model_name")
+        acc = fp_fn.get("acc")
+        suffix = ""
+        if model_name is not None and acc is not None:
+            suffix = f" | {model_name} ({acc * 100:.2f}%)"
+        ax.set_title(f"{ds_name} with FP/FN{suffix}")
+        ax.set_xlabel('$x_1$')
+        ax.set_ylabel('$x_2$')
+        ax.set_aspect('equal', 'box')
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    plt.tight_layout()
+    plt.show(block=False)
+    plt.pause(0.001)
+    return True
 
 
 # ============================
@@ -355,6 +415,7 @@ __all__ = [
     "generate_intertwined_spirals",
     "plot_dataset",
     "plot_three_datasets",
+    "plot_three_datasets_with_fp_fn",
     "_c1_predicate",
     "_c2_predicate",
 ]

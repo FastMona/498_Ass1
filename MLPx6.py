@@ -17,6 +17,7 @@ MLP_ARCHITECTURES = {
     "MLP_3": [32, 32],                # 3 hidden layers
     "MLP_4": [64],                # 4
     "MLP_5": [64, 64],                # 5
+    "MLP_6": [64, 64, 64],                # 6 (duplicate of MLP_5 for now)
 }
 
 
