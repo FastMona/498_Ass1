@@ -8,26 +8,20 @@ def compare_all_three_methods():
     """Generate and visualize all three sampling methods side by side."""
     n = 600
     seed = 7
-    r_inner = 1.0
-    r_outer = 2.0
-    shift = 1.0
     
     print("Generating data with three sampling methods...")
     
     # Generate data for each method
     rnd_data = generate_intertwined_spirals(
-        n=n, r_inner=r_inner, r_outer=r_outer, shift=shift, 
-        seed=seed, sampling_method='RND', plot=False
+        n=n, seed=seed, sampling_method='RND', plot=False
     )
     
     ctr_data = generate_intertwined_spirals(
-        n=n, r_inner=r_inner, r_outer=r_outer, shift=shift, 
-        seed=seed, sampling_method='CTR', plot=False
+        n=n, seed=seed, sampling_method='CTR', plot=False
     )
     
     edge_data = generate_intertwined_spirals(
-        n=n, r_inner=r_inner, r_outer=r_outer, shift=shift, 
-        seed=seed, sampling_method='EDGE', plot=False
+        n=n, seed=seed, sampling_method='EDGE', plot=False
     )
     
     # Extract data for plotting

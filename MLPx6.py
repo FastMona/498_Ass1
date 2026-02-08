@@ -12,11 +12,11 @@ import matplotlib.pyplot as plt
 
 MLP_ARCHITECTURES = {
     "MLP_0": [],                        # No hidden layers (logistic regression)
-    "MLP_1": [8],                  # 16 node hidden layer
-    "MLP_2": [8, 8],                  # 64 node hidden layers
-    "MLP_3": [16],                # 3 hidden layers
-    "MLP_4": [16, 16],                # 4
-    "MLP_5": [16, 16, 16],                # 5
+    "MLP_1": [16],                  # 16 node hidden layer
+    "MLP_2": [32],                  # 64 node hidden layers
+    "MLP_3": [32, 32],                # 3 hidden layers
+    "MLP_4": [64],                # 4
+    "MLP_5": [64, 64],                # 5
 }
 
 
@@ -154,7 +154,7 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     test_losses = []
 
     # Early stopping parameters (using validation set)
-    patience = 10
+    patience = 3
     best_val_loss = float('inf')
     best_model_state = None
     best_epoch = 0
@@ -223,6 +223,21 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         test_losses = test_losses[:best_epoch + 1]
 
     return model, train_losses, val_losses, test_losses
+
+
+def confusion_counts(model, test_loader):
+    """Return confusion counts (TN, FP, FN, TP) on the test set."""
+    model.eval()
+    tn = fp = fn = tp = 0
+    with torch.no_grad():
+        for x_batch, y_batch in test_loader:
+            outputs = model(x_batch)
+            predicted = (outputs > 0.5).float()
+            tn += ((predicted == 0) & (y_batch == 0)).sum().item()
+            fp += ((predicted == 1) & (y_batch == 0)).sum().item()
+            fn += ((predicted == 0) & (y_batch == 1)).sum().item()
+            tp += ((predicted == 1) & (y_batch == 1)).sum().item()
+    return tn, fp, fn, tp
 
 
 def predict(model, x, y):
@@ -326,5 +341,6 @@ __all__ = [
     "train_model",
     "predict",
     "evaluate_model",
+    "confusion_counts",
     "plot_learning_curves",
 ]

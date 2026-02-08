@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 from matplotlib.path import Path
 
 from regions import classify_points, get_region_paths, build_c1_boundary
@@ -22,13 +21,13 @@ def _mask_from_path(path: Path, x, y, include_boundary: bool = True):
     return mask.reshape(np.shape(x))
 
 
-def _c1_predicate(x, y, r_inner=None, r_outer=None, shift=None):
-    """C1: Region from regions.py; parameters kept for compatibility."""
+def _c1_predicate(x, y):
+    """C1: Region from regions.py."""
     return _mask_from_path(_C1_PATH, x, y, include_boundary=True)
 
 
-def _c2_predicate(x, y, r_inner=None, r_outer=None, shift=None):
-    """C2: Region from regions.py; parameters kept for compatibility."""
+def _c2_predicate(x, y):
+    """C2: Region from regions.py."""
     c2_mask = _mask_from_path(_C2_PATH, x, y, include_boundary=True)
     c1_mask = _mask_from_path(_C1_PATH, x, y, include_boundary=True)
     return c2_mask & ~c1_mask
@@ -50,7 +49,7 @@ def _plot_interlocked_region_boundaries(
     ax.plot(c1_x, c1_y, color="tab:blue", lw=2.5, zorder=1)
 
 
-def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, r_inner, r_outer, shift):
+def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data):
     """Plot side-by-side comparison of RND, CTR, and EDGE sampling methods."""
     _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
 
@@ -123,9 +122,6 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, r_inner, r_outer
 
 def generate_intertwined_spirals(
     n=600,
-    r_inner=1.0,
-    r_outer=2.0,
-    shift=1.0,
     noise_std=0.0,
     seed=None,
     plot=False,
@@ -133,8 +129,6 @@ def generate_intertwined_spirals(
 ):
     """
     Generate datasets for regions defined in regions.py.
-
-    r_inner, r_outer, and shift are kept for compatibility but are not used.
 
     Parameters:
     -----------
@@ -190,10 +184,36 @@ def generate_intertwined_spirals(
         vertices = path.vertices
 
         def sampler(batch: int) -> np.ndarray:
-            idx = rng.integers(0, len(vertices), size=batch)
-            base = vertices[idx]
-            noise = rng.normal(scale=sigma, size=base.shape)
-            return base + noise
+            boundary_batch = max(1, int(0.15 * batch))
+            vertex_batch = batch - boundary_batch
+
+            if vertex_batch > 0:
+                idx = rng.integers(0, len(vertices), size=vertex_batch)
+                base = vertices[idx]
+                noise = rng.normal(scale=sigma, size=base.shape)
+                vertex_points = base + noise
+            else:
+                vertex_points = np.empty((0, 2))
+
+            shared_count = max(1, boundary_batch // 2)
+            region_count = boundary_batch - shared_count
+
+            y_shared = rng.uniform(-1.0, 0.0, shared_count)
+            x_shared = rng.normal(0.0, sigma, shared_count)
+            shared_points = np.column_stack([x_shared, y_shared])
+
+            if region == "C1":
+                y_region = rng.uniform(1.0, 2.0, region_count)
+            elif region == "C2":
+                y_region = rng.uniform(-3.0, -2.0, region_count)
+            else:
+                y_region = rng.uniform(-1.0, 0.0, region_count)
+            x_region = rng.normal(0.0, sigma, region_count)
+            region_points = np.column_stack([x_region, y_region])
+
+            boundary_points = np.vstack([shared_points, region_points])
+
+            return np.vstack([vertex_points, boundary_points])
 
         return sampler
 
@@ -234,7 +254,7 @@ def generate_intertwined_spirals(
                     [(c2_edge[i, 0], c2_edge[i, 1], 1) for i in range(n)]
 
         if plot:
-            _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, r_inner, r_outer, shift)
+            _plot_three_sampling_methods(rnd_data, ctr_data, edge_data)
 
         return rnd_data, ctr_data, edge_data
 
@@ -275,9 +295,6 @@ def generate_intertwined_spirals(
 
 DATA_PARAMS = {
     "n": 1000,            # Number of points per region
-    "r_inner": 1.0,        # Inner radius
-    "r_outer": 2.0,        # Outer radius
-    "shift": 1.0,          # Downward shift of right half
     "noise_std": 0.0,      # Gaussian noise (0 for clean boundaries)
     "seed": 7,
     "sampling_method": "ALL",  # "RND" (uniform random), "CTR" (center-weighted), "EDGE" (boundary-attracted), or "ALL" (generate all three)
@@ -329,9 +346,6 @@ def plot_three_datasets(dataset_storage, data_params):
         rnd_data,
         ctr_data,
         edge_data,
-        data_params["r_inner"],
-        data_params["r_outer"],
-        data_params["shift"],
     )
     return True
 

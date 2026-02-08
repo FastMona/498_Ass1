@@ -10,6 +10,7 @@ from MLPx6 import (
     train_model,
     evaluate_model,
     predict,
+    confusion_counts,
     plot_learning_curves,
 )
 
@@ -22,9 +23,6 @@ def _generate_datasets(data_params, active_dataset):
     if sampling_method == "ALL":
         result = generate_intertwined_spirals(
             n=data_params["n"],
-            r_inner=data_params["r_inner"],
-            r_outer=data_params["r_outer"],
-            shift=data_params["shift"],
             noise_std=data_params["noise_std"],
             seed=data_params["seed"],
             sampling_method="ALL",
@@ -66,18 +64,15 @@ def main():
     print("INTERTWINED SPIRALS CLASSIFICATION WITH MLPs")
     print("="*60)
 
-    # Generate spiral data
-    print("\nGenerating interlocked region data...")
-    active_dataset = "RND"  # Default active dataset
-    dataset_storage, active_dataset, spirals, sampling_method = _generate_datasets(DATA_PARAMS, active_dataset)
-    if sampling_method == "ALL":
-        print("Generated RND, CTR, and EDGE datasets")
-        print(f"Active dataset for training: {active_dataset}")
+    # Start with empty datasets; user generates via option 1.
+    active_dataset = "RND"
+    dataset_storage = {}
+    spirals = []
+    sampling_method = DATA_PARAMS.get("sampling_method", "ALL")
 
-    total_points = len(spirals)
-    points_per_spiral = DATA_PARAMS["n"]
-    print(f"Total points: {total_points} ({points_per_spiral} per spiral)")
-    print(f"Data parameters: {DATA_PARAMS}")
+    active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed")}
+    print("\nNo datasets loaded. Use option 1 to generate datasets.")
+    print(f"Data parameters (active): {active_params}")
     print(f"Sampling method: {sampling_method}")
 
     # Create models dictionary - organized by dataset
@@ -91,17 +86,18 @@ def main():
         print("\n" + "="*60)
         print("MAIN MENU")
         print("="*60)
+        print("0. Exit")
         print("1. Create Datasets")
         print("2. Display Current Dataset")
-        print("3. Single Point Test (classify one point)")
         if len(dataset_storage) > 1:
-            print("4. Train on ALL Datasets")
+            print("3. Train on ALL Datasets")
+        print("4. Single Point Test (classify one point)")
+        if len(dataset_storage) > 1:
             print("5. Cross-Dataset Comparison")
-        print("6. Cleanup")
-        print("0. Exit")
+        print("9. Cleanup")
         print("="*60)
 
-        max_option = "6" if len(dataset_storage) > 1 else "4"
+        max_option = "9" if len(dataset_storage) > 1 else "4"
         choice = input(f"Select option (0-{max_option}): ").strip()
 
         if choice == "1":
@@ -138,11 +134,156 @@ def main():
             print("\n" + "="*60)
             print("DISPLAY CURRENT DATA SETS")
             print("="*60)
+            if not dataset_storage:
+                print("No datasets; recreate datasets first (option 1).")
+                continue
             if not plot_three_datasets(dataset_storage, DATA_PARAMS):
                 print("Missing datasets; recreate datasets first (option 1).")
-        elif choice == "3":
+        elif choice == "3" and len(dataset_storage) > 1:
+            print("\n" + "="*60)
+            print("TRAIN ON ALL DATASETS")
+            print("="*60)
+            print("Available architectures:")
+            for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items(), 1):
+                print(f"  {i}. {name}: {arch}")
+
+            train_choice = input("\nTrain which architecture(s)? (default 'all', or '1', '1,2,3'): ").strip().lower()
+
+            if train_choice == "all" or train_choice == "":
+                architectures_to_train = list(MLP_ARCHITECTURES.items())
+            else:
+                try:
+                    indices = [int(x.strip()) - 1 for x in train_choice.split(",")]
+                    architectures_to_train = [
+                        (name, arch) for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items())
+                        if i in indices
+                    ]
+                except (ValueError, IndexError):
+                    print("Invalid input. Using all architectures.")
+                    architectures_to_train = list(MLP_ARCHITECTURES.items())
+
+            epochs_str = input("Number of epochs (default 100): ").strip()
+            epochs = int(epochs_str) if epochs_str else 100
+
+            lr_str = input("Learning rate (default 0.001): ").strip()
+            lr = float(lr_str) if lr_str else 0.001
+
+            # Train on all datasets
+            all_results = {}  # {dataset: {model_name: accuracy}}
+            for ds_name in dataset_storage.keys():
+                print(f"\n{'='*60}")
+                print(f"Training on {ds_name} dataset")
+                print(f"{'='*60}")
+                all_results[ds_name] = {}
+
+                for arch_name, hidden_layers in architectures_to_train:
+                    print(f"\n  Training {hidden_layers}...")
+                    model = MLP(hidden_layers)
+                    trained_model, train_losses, val_losses, test_losses = train_model(
+                        model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
+                        epochs=epochs, lr=lr, verbose=True
+                    )
+
+                    trained_models[ds_name][arch_name] = trained_model
+                    train_histories[ds_name][arch_name] = {
+                        "train_losses": train_losses,
+                        "val_losses": val_losses,
+                        "test_losses": test_losses
+                    }
+
+                    tn, fp, fn, tp = confusion_counts(trained_model, test_loaders[ds_name])
+                    print("    Confusion (test, best model):")
+                    print(f"      TN: {tn:5d}  FP: {fp:5d}")
+                    print(f"      FN: {fn:5d}  TP: {tp:5d}")
+                    final_acc = evaluate_model(trained_model, test_loaders[ds_name])
+                    all_results[ds_name][arch_name] = final_acc
+                    print(f"    Test Accuracy: {final_acc*100:.2f}%")
+
+            # Display summary comparison
+            print("\n" + "="*60)
+            print("TRAINING SUMMARY - ALL DATASETS")
+            print("="*60)
+            print(f"{'Architecture':24s} | ", end="")
+            for ds_name in dataset_storage.keys():
+                print(f"{ds_name:^10s} | ", end="")
+            print()
+            print("-"*70)
+
+            for arch_name, hidden_layers in architectures_to_train:
+                print(f"{str(hidden_layers):24s} | ", end="")
+                for ds_name in dataset_storage.keys():
+                    acc = all_results[ds_name][arch_name]
+                    print(f"{acc*100:9.2f}% | ", end="")
+                print()
+
+            ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in train_histories]
+            if ordered_datasets:
+                fig, axes = plt.subplots(1, len(ordered_datasets), figsize=(6 * len(ordered_datasets), 4))
+                if len(ordered_datasets) == 1:
+                    axes = [axes]
+
+                all_val_losses = []
+                for ds_name in ordered_datasets:
+                    histories = train_histories.get(ds_name, {})
+                    for history in histories.values():
+                        val_losses = history.get("val_losses", [])
+                        if val_losses:
+                            all_val_losses.extend(val_losses)
+
+                y_min = min(all_val_losses) if all_val_losses else None
+                y_max = max(all_val_losses) if all_val_losses else None
+                if y_min is not None and y_max is not None:
+                    if y_min == y_max:
+                        y_min -= 0.01
+                        y_max += 0.01
+                    padding = 0.05 * (y_max - y_min)
+                    y_min -= padding
+                    y_max += padding
+
+                for ax, ds_name in zip(axes, ordered_datasets):
+                    histories = train_histories.get(ds_name, {})
+                    if not histories:
+                        continue
+                    for model_name, history in histories.items():
+                        val_losses = history.get("val_losses", [])
+                        if not val_losses:
+                            continue
+                        epochs_range = range(1, len(val_losses) + 1)
+                        arch = MLP_ARCHITECTURES.get(model_name, [])
+                        ax.plot(epochs_range, val_losses, label=f"{arch}")
+                    ax.set_title(f"Validation Loss - {ds_name}")
+                    ax.set_xlabel("Epoch")
+                    ax.set_ylabel("Loss")
+                    ax.grid(True, alpha=0.3)
+                    ax.legend(fontsize=8)
+                    if y_min is not None and y_max is not None:
+                        ax.set_ylim(y_min, y_max)
+                fig.tight_layout()
+                plt.show(block=False)
+                plt.pause(0.001)
+
+            # Save to file
+            with open('test_results.txt', 'a') as f:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"\n{'='*60}\n")
+                f.write(f"Multi-Dataset Training Results - {timestamp}\n")
+                f.write(f"{'='*60}\n")
+                f.write(f"{'Architecture':24s} | ")
+                for ds_name in dataset_storage.keys():
+                    f.write(f"{ds_name:^10s} | ")
+                f.write("\n" + "-"*70 + "\n")
+                for arch_name, hidden_layers in architectures_to_train:
+                    f.write(f"{str(hidden_layers):24s} | ")
+                    for ds_name in dataset_storage.keys():
+                        acc = all_results[ds_name][arch_name]
+                        f.write(f"{acc*100:9.2f}% | ")
+                    f.write("\n")
+
+            print("\nResults saved to test_results.txt")
+
+        elif choice == "4":
             if not any(any(models.values()) for models in trained_models.values()):
-                print("\nNo trained models yet. Please train models first (option 4).")
+                print("\nNo trained models yet. Please train models first (option 3).")
                 continue
 
             print("\n" + "="*60)
@@ -185,105 +326,13 @@ def main():
             except ValueError:
                 print("Invalid input. Please enter valid numbers.")
 
-        elif choice == "4" and len(dataset_storage) > 1:
-            print("\n" + "="*60)
-            print("TRAIN ON ALL DATASETS")
-            print("="*60)
-            print("Available architectures:")
-            for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items(), 1):
-                print(f"  {i}. {name}: {arch}")
-
-            train_choice = input("\nTrain which architecture(s)? (default 'all', or '1', '1,2,3'): ").strip().lower()
-
-            if train_choice == "all" or train_choice == "":
-                architectures_to_train = list(MLP_ARCHITECTURES.items())
-            else:
-                try:
-                    indices = [int(x.strip()) - 1 for x in train_choice.split(",")]
-                    architectures_to_train = [
-                        (name, arch) for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items())
-                        if i in indices
-                    ]
-                except (ValueError, IndexError):
-                    print("Invalid input. Using all architectures.")
-                    architectures_to_train = list(MLP_ARCHITECTURES.items())
-
-            epochs_str = input("Number of epochs (default 100): ").strip()
-            epochs = int(epochs_str) if epochs_str else 100
-
-            lr_str = input("Learning rate (default 0.001): ").strip()
-            lr = float(lr_str) if lr_str else 0.001
-
-            # Train on all datasets
-            all_results = {}  # {dataset: {model_name: accuracy}}
-            for ds_name in dataset_storage.keys():
-                print(f"\n{'='*60}")
-                print(f"Training on {ds_name} dataset")
-                print(f"{'='*60}")
-                all_results[ds_name] = {}
-
-                for arch_name, hidden_layers in architectures_to_train:
-                    print(f"\n  Training {hidden_layers}...")
-                    model = MLP(hidden_layers)
-                    trained_model, train_losses, val_losses, test_losses = train_model(
-                        model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
-                        epochs=epochs, lr=lr, verbose=False
-                    )
-
-                    trained_models[ds_name][arch_name] = trained_model
-                    train_histories[ds_name][arch_name] = {
-                        "train_losses": train_losses,
-                        "val_losses": val_losses,
-                        "test_losses": test_losses
-                    }
-
-                    final_acc = evaluate_model(trained_model, test_loaders[ds_name])
-                    all_results[ds_name][arch_name] = final_acc
-                    print(f"    Test Accuracy: {final_acc*100:.2f}%")
-
-            # Display summary comparison
-            print("\n" + "="*60)
-            print("TRAINING SUMMARY - ALL DATASETS")
-            print("="*60)
-            print(f"{'Architecture':24s} | ", end="")
-            for ds_name in dataset_storage.keys():
-                print(f"{ds_name:^10s} | ", end="")
-            print()
-            print("-"*70)
-
-            for arch_name, hidden_layers in architectures_to_train:
-                print(f"{str(hidden_layers):24s} | ", end="")
-                for ds_name in dataset_storage.keys():
-                    acc = all_results[ds_name][arch_name]
-                    print(f"{acc*100:9.2f}% | ", end="")
-                print()
-
-            for ds_name, histories in train_histories.items():
-                if histories:
-                    plot_learning_curves(histories, title=f"Learning Curves - {ds_name}")
-
-            # Save to file
-            with open('test_results.txt', 'a') as f:
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                f.write(f"\n{'='*60}\n")
-                f.write(f"Multi-Dataset Training Results - {timestamp}\n")
-                f.write(f"{'='*60}\n")
-                f.write(f"{'Architecture':24s} | ")
-                for ds_name in dataset_storage.keys():
-                    f.write(f"{ds_name:^10s} | ")
-                f.write("\n" + "-"*70 + "\n")
-                for arch_name, hidden_layers in architectures_to_train:
-                    f.write(f"{str(hidden_layers):24s} | ")
-                    for ds_name in dataset_storage.keys():
-                        acc = all_results[ds_name][arch_name]
-                        f.write(f"{acc*100:9.2f}% | ")
-                    f.write("\n")
-
-            print("\nResults saved to test_results.txt")
+        elif choice == "0":
+            print("\nExiting. Goodbye!")
+            break
 
         elif choice == "5" and len(dataset_storage) > 1:
             if not any(any(models.values()) for models in trained_models.values()):
-                print("\nNo trained models yet. Please train models first (option 4).")
+                print("\nNo trained models yet. Please train models first (option 3).")
                 continue
 
             print("\n" + "="*60)
@@ -317,7 +366,7 @@ def main():
 
             print(f"\nTesting models trained on {source_ds} across all datasets...")
             print("\n" + "="*60)
-            print("CROSS-DATASET PERFORMANCE")
+            print(f"CROSS PERFORMANCE USING {source_ds} DATASET")
             print("="*60)
             print(f"{'Architecture':24s} | ", end="")
             for test_ds in dataset_storage.keys():
@@ -327,7 +376,6 @@ def main():
 
             cross_results = {}  # {model_name: {test_dataset: accuracy}}
             for model_name in available_models:
-                # Get the hidden layers for this model from MLP_ARCHITECTURES
                 hidden_layers = MLP_ARCHITECTURES.get(model_name, "N/A")
                 cross_results[model_name] = {}
                 print(f"{str(hidden_layers):24s} | ", end="")
@@ -351,7 +399,6 @@ def main():
                     f.write(f"{test_ds:^10s} | ")
                 f.write("\n" + "-"*70 + "\n")
                 for model_name in available_models:
-                    # Get the hidden layers for this model
                     hidden_layers = MLP_ARCHITECTURES.get(model_name, "N/A")
                     f.write(f"{str(hidden_layers):24s} | ")
                     for test_ds in dataset_storage.keys():
@@ -361,11 +408,7 @@ def main():
 
             print("\nResults saved to test_results.txt")
 
-        elif choice == "0":
-            print("\nExiting. Goodbye!")
-            break
-
-        elif choice == "6":
+        elif choice == "9":
             print("\n" + "="*60)
             print("CLEANUP")
             print("="*60)
@@ -374,7 +417,16 @@ def main():
             clear_train = input("Clear training data? (y/n): ").strip().lower() == "y"
 
             if clear_test:
-                test_loaders = {ds: None for ds in test_loaders.keys()}
+                dataset_storage = {}
+                active_dataset = "RND"
+                spirals = []
+                train_loaders = {}
+                val_loaders = {}
+                test_loaders = {}
+                trained_models = {}
+                train_histories = {}
+                plt.close("all")
+                print("Datasets cleared.")
                 print("Test data cleared.")
             if clear_train:
                 trained_models = {ds: {} for ds in trained_models.keys()}
@@ -400,7 +452,7 @@ def main():
                 print("test_results.txt not found; nothing to trim.")
 
         else:
-            max_valid = 6 if len(dataset_storage) > 1 else 4
+            max_valid = 9 if len(dataset_storage) > 1 else 4
             print(f"Invalid option. Please select 0-{max_valid}.")
 
 

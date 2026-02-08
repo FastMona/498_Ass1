@@ -7,9 +7,6 @@ from data import generate_intertwined_spirals
 print("Testing ALL sampling methods (RND, CTR, and EDGE)...")
 result = generate_intertwined_spirals(
     n=500,
-    r_inner=1.0,
-    r_outer=2.0,
-    shift=1.0,
     seed=7,
     plot=True,
     sampling_method='ALL'
