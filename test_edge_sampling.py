@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Test script for edge-weighted sampling method - compares all three methods."""
 
-from spirals_mlp import generate_intertwined_spirals
+from data import generate_intertwined_spirals
 import matplotlib.pyplot as plt
 
 def compare_all_three_methods():

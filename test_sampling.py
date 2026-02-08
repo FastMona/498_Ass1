@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Test script for all three sampling methods (RND, CTR, and EDGE)."""
 
-from spirals_mlp import generate_intertwined_spirals
+from data import generate_intertwined_spirals
 
-# Test with BOTH sampling methods - should show side-by-side plots with all three
+# Test with ALL sampling methods - should show side-by-side plots with all three
 print("Testing ALL sampling methods (RND, CTR, and EDGE)...")
 result = generate_intertwined_spirals(
     n=500,
@@ -12,7 +12,7 @@ result = generate_intertwined_spirals(
     shift=1.0,
     seed=7,
     plot=True,
-    sampling_method='BOTH'
+    sampling_method='ALL'
 )
 
 if isinstance(result, tuple) and len(result) == 3:
