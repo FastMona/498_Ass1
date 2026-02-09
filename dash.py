@@ -49,7 +49,7 @@ def _generate_datasets(data_params, active_dataset):
     return dataset_storage, active_dataset, spirals, sampling_method
 
 
-def _init_dataloaders(dataset_storage, batch_size=32):
+def _init_dataloaders(dataset_storage, batch_size=32, test_split=0.2, val_split=0.2):
     train_loaders = {}
     val_loaders = {}
     test_loaders = {}
@@ -58,7 +58,7 @@ def _init_dataloaders(dataset_storage, batch_size=32):
 
     for ds_name in dataset_storage.keys():
         train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name] = prepare_data(
-            dataset_storage[ds_name], test_split=0.2, val_split=0.2, batch_size=batch_size
+            dataset_storage[ds_name], test_split=test_split, val_split=val_split, batch_size=batch_size
         )
         trained_models[ds_name] = {}
         train_histories[ds_name] = {}
@@ -106,14 +106,26 @@ def main():
     spirals = []
     sampling_method = DATA_PARAMS.get("sampling_method", "ALL")
 
+    # Data split parameters - defaults: 64% train / 16% val / 20% test
+    split_params = {
+        "test_split": 0.2,  # 20%
+        "val_split": 0.2    # 20% of remaining (16% overall)
+    }
+
     active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed")}
     print("\nNo datasets loaded. Use option 1 to generate datasets.")
     print(f"Data parameters (active): {active_params}")
     print(f"Sampling method: {sampling_method}")
+    
+    # Calculate and display split percentages
+    test_pct = split_params["test_split"] * 100
+    val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
+    train_pct = 100 - test_pct - val_pct
+    print(f"Data split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
 
     # Create models dictionary - organized by dataset
     train_loaders, val_loaders, test_loaders, trained_models, train_histories = _init_dataloaders(
-        dataset_storage, batch_size=32
+        dataset_storage, batch_size=32, test_split=split_params["test_split"], val_split=split_params["val_split"]
     )
 
     plt.ion()
@@ -141,7 +153,49 @@ def main():
             print("\n" + "="*60)
             print("CREATE DATA SETS")
             print("="*60)
-            n_str = input(f"Number of points per region (default {DATA_PARAMS['n']}): ").strip()
+            
+            # Configure data split percentages
+            test_pct = split_params["test_split"] * 100
+            val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
+            train_pct = 100 - test_pct - val_pct
+            print(f"\nCurrent split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
+            
+            configure_split = input("Configure data split? (y/n, default n): ").strip().lower()
+            if configure_split == 'y':
+                test_input = input(f"Test percentage (default {test_pct:.0f}): ").strip()
+                if test_input:
+                    try:
+                        test_value = float(test_input)
+                        if 0 < test_value < 100:
+                            split_params["test_split"] = test_value / 100
+                        else:
+                            print("Invalid value. Must be between 0 and 100. Keeping existing value.")
+                    except ValueError:
+                        print("Invalid value. Keeping existing test percentage.")
+                
+                # Recalculate for validation input
+                remaining = 100 - (split_params["test_split"] * 100)
+                current_val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
+                
+                val_input = input(f"Validation percentage (default {current_val_pct:.0f}, max {remaining:.0f}): ").strip()
+                if val_input:
+                    try:
+                        val_value = float(val_input)
+                        if 0 < val_value < remaining:
+                            # val_split is fraction of remaining data after test split
+                            split_params["val_split"] = val_value / (100 * (1 - split_params["test_split"]))
+                        else:
+                            print(f"Invalid value. Must be between 0 and {remaining:.0f}. Keeping existing value.")
+                    except ValueError:
+                        print("Invalid value. Keeping existing validation percentage.")
+                
+                # Display final split
+                test_pct = split_params["test_split"] * 100
+                val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
+                train_pct = 100 - test_pct - val_pct
+                print(f"Final split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
+            
+            n_str = input(f"\nNumber of points per region (default {DATA_PARAMS['n']}): ").strip()
             if n_str:
                 try:
                     n_value = int(n_str)
@@ -164,7 +218,7 @@ def main():
             print(f"Active dataset for training: {active_dataset}")
 
             train_loaders, val_loaders, test_loaders, trained_models, train_histories = _init_dataloaders(
-                dataset_storage, batch_size=32
+                dataset_storage, batch_size=32, test_split=split_params["test_split"], val_split=split_params["val_split"]
             )
 
         elif choice == "2":
@@ -174,6 +228,30 @@ def main():
             if not dataset_storage:
                 print("No datasets; recreate datasets first (option 1).")
                 continue
+            
+            # Display dataset parameters
+            print("\nDataset Parameters:")
+            print(f"  Points per region: {DATA_PARAMS['n']}")
+            print(f"  Noise std: {DATA_PARAMS['noise_std']}")
+            print(f"  Seed: {DATA_PARAMS['seed']}")
+            print(f"  Sampling method: {DATA_PARAMS.get('sampling_method', 'ALL')}")
+            
+            # Display split information
+            test_pct = split_params["test_split"] * 100
+            val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
+            train_pct = 100 - test_pct - val_pct
+            print(f"  Data split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
+            
+            # Display dataset sizes
+            print("\nDataset Sizes:")
+            for ds_name in dataset_storage.keys():
+                total = len(dataset_storage[ds_name])
+                n_test = int(total * split_params["test_split"])
+                n_trainval = total - n_test
+                n_val = int(n_trainval * split_params["val_split"])
+                n_train = n_trainval - n_val
+                print(f"  {ds_name}: {total} total ({n_train} train, {n_val} val, {n_test} test)")
+            
             if not plot_three_datasets(dataset_storage, DATA_PARAMS):
                 print("Missing datasets; recreate datasets first (option 1).")
         elif choice == "3" and len(dataset_storage) > 1:
