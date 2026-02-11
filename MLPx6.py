@@ -4,6 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 import numpy as np
 import matplotlib.pyplot as plt
+import time
 
 
 # ============================
@@ -146,6 +147,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     train_losses : list of training losses
     val_losses : list of validation losses
     test_losses : list of test losses
+    train_time_ms : float
+        Elapsed time used for training in milliseconds
     """
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -160,6 +163,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     best_model_state = None
     best_epoch = 0
     patience_counter = 0
+
+    start_time = time.perf_counter()
 
     for epoch in range(epochs):
         # Training phase
@@ -215,6 +220,12 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
                 print(f"Early stopping at epoch {epoch + 1} (best epoch: {best_epoch + 1}, Val Loss: {best_val_loss:.4f})")
             break
 
+    train_time_ms = (time.perf_counter() - start_time) * 1000.0
+
+    if verbose:
+        train_time_s = train_time_ms / 1000.0
+        print(f"Training time: {train_time_s:.2f} s")
+
     # Restore best model state
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
@@ -223,7 +234,7 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         val_losses = val_losses[:best_epoch + 1]
         test_losses = test_losses[:best_epoch + 1]
 
-    return model, train_losses, val_losses, test_losses
+    return model, train_losses, val_losses, test_losses, train_time_ms
 
 
 def confusion_counts(model, test_loader):

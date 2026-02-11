@@ -6,7 +6,7 @@ from datetime import datetime
 from data import (
     DATA_PARAMS,
     generate_intertwined_spirals,
-    plot_dataset,
+    normalize_spirals,
     plot_three_datasets,
     plot_three_datasets_with_fp_fn,
 )
@@ -18,7 +18,6 @@ from MLPx6 import (
     evaluate_model,
     predict,
     confusion_counts,
-    plot_learning_curves,
 )
 
 
@@ -26,6 +25,7 @@ def _generate_datasets(data_params, active_dataset):
     sampling_method = "ALL"
     data_params["sampling_method"] = sampling_method
     dataset_storage = {}
+    norm_stats_by_dataset = {}
 
     if sampling_method == "ALL":
         result = generate_intertwined_spirals(
@@ -46,7 +46,14 @@ def _generate_datasets(data_params, active_dataset):
         dataset_storage[sampling_method] = spirals
         active_dataset = sampling_method
 
-    return dataset_storage, active_dataset, spirals, sampling_method
+    if data_params.get("normalize", False):
+        for ds_name, ds_data in list(dataset_storage.items()):
+            normalized_data, stats = normalize_spirals(ds_data)
+            dataset_storage[ds_name] = normalized_data
+            norm_stats_by_dataset[ds_name] = stats
+        spirals = dataset_storage[active_dataset]
+
+    return dataset_storage, active_dataset, spirals, sampling_method, norm_stats_by_dataset
 
 
 def _init_dataloaders(dataset_storage, batch_size=32):
@@ -95,6 +102,129 @@ def _print_point_list(label, points, limit):
         print(f"  ({x:.4f}, {y:.4f})")
 
 
+def _read_int(prompt, default, min_value=1):
+    value_str = input(prompt).strip()
+    if not value_str:
+        return default
+    try:
+        value = int(value_str)
+        if value < min_value:
+            raise ValueError
+        return value
+    except ValueError:
+        print(f"Invalid value. Using default {default}.")
+        return default
+
+
+def _read_float(prompt, default, min_value=1e-12):
+    value_str = input(prompt).strip()
+    if not value_str:
+        return default
+    try:
+        value = float(value_str)
+        if value < min_value:
+            raise ValueError
+        return value
+    except ValueError:
+        print(f"Invalid value. Using default {default}.")
+        return default
+
+
+def _select_architectures():
+    print("Available architectures:")
+    for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items(), 1):
+        print(f"  {i}. {name}: {arch}")
+
+    train_choice = input("\nSelect architectures (default 'all', or '1', '1,2,3'): ").strip().lower()
+    if train_choice == "all" or train_choice == "":
+        return list(MLP_ARCHITECTURES.items())
+
+    try:
+        indices = [int(x.strip()) - 1 for x in train_choice.split(",")]
+        return [
+            (name, arch) for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items())
+            if i in indices
+        ]
+    except (ValueError, IndexError):
+        print("Invalid input. Using all architectures.")
+        return list(MLP_ARCHITECTURES.items())
+
+
+def _print_training_time_summary(train_histories, dataset_storage, points_per_cat):
+    ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage]
+    if not ordered_datasets or not any(train_histories.get(ds) for ds in ordered_datasets):
+        print("\nNo training time data available. Train models first (option 3).")
+        return
+
+    print("\n" + "="*60)
+    print(f"TRAINING TIME SUMMARY - {points_per_cat} POINTS PER CAT")
+    print("="*60)
+
+    model_names = [
+        name for name in MLP_ARCHITECTURES.keys()
+        if any(name in train_histories.get(ds, {}) for ds in ordered_datasets)
+    ]
+    if not model_names:
+        print("No recorded training times found.")
+        return
+
+    model_col_width = 34
+    time_col_width = 10
+    header_parts = [f"{'Model (arch)':{model_col_width}s}"]
+    for ds_name in ordered_datasets:
+        header_parts.append(f"{ds_name} s".center(time_col_width))
+    header_parts.append("avg s".center(time_col_width))
+    header_line = " | ".join(header_parts)
+    print(header_line)
+    print("-" * len(header_line))
+
+    for model_name in model_names:
+        arch = MLP_ARCHITECTURES.get(model_name, [])
+        label = f"{model_name} {arch}"
+        if len(label) > model_col_width:
+            label = label[:model_col_width - 3] + "..."
+        row_parts = [f"{label:{model_col_width}s}"]
+        times = []
+        for ds_name in ordered_datasets:
+            time_s = train_histories.get(ds_name, {}).get(model_name, {}).get("train_time_s")
+            if time_s is None:
+                row_parts.append(f"{'--':>9s}")
+            else:
+                row_parts.append(f"{time_s:9.2f}")
+                times.append(time_s)
+        avg_time = sum(times) / len(times) if times else None
+        row_parts.append(f"{avg_time:9.2f}" if avg_time is not None else f"{'--':>9s}")
+        print(" | ".join(row_parts))
+
+    with open("test_results.txt", "a") as f:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"\n{'='*60}\n")
+        f.write(f"Training Time Summary - {timestamp}\n")
+        f.write(f"POINTS PER CAT: {points_per_cat}\n")
+        f.write(f"{'='*60}\n")
+        f.write(header_line + "\n")
+        f.write("-" * len(header_line) + "\n")
+        for model_name in model_names:
+            arch = MLP_ARCHITECTURES.get(model_name, [])
+            label = f"{model_name} {arch}"
+            if len(label) > model_col_width:
+                label = label[:model_col_width - 3] + "..."
+            row_parts = [f"{label:{model_col_width}s}"]
+            times = []
+            for ds_name in ordered_datasets:
+                time_s = train_histories.get(ds_name, {}).get(model_name, {}).get("train_time_s")
+                if time_s is None:
+                    row_parts.append(f"{'--':>9s}")
+                else:
+                    row_parts.append(f"{time_s:9.2f}")
+                    times.append(time_s)
+            avg_time = sum(times) / len(times) if times else None
+            row_parts.append(f"{avg_time:9.2f}" if avg_time is not None else f"{'--':>9s}")
+            f.write(" | ".join(row_parts) + "\n")
+
+    print("\nTraining time summary saved to test_results.txt")
+
+
 def main():
     print("="*60)
     print("INTERTWINED SPIRALS CLASSIFICATION WITH MLPs")
@@ -105,8 +235,9 @@ def main():
     dataset_storage = {}
     spirals = []
     sampling_method = DATA_PARAMS.get("sampling_method", "ALL")
+    norm_stats_by_dataset = {}
 
-    active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed")}
+    active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed", "normalize")}
     print("\nNo datasets loaded. Use option 1 to generate datasets.")
     print(f"Data parameters (active): {active_params}")
     print(f"Sampling method: {sampling_method}")
@@ -122,7 +253,6 @@ def main():
         print("\n" + "="*60)
         print("MAIN MENU")
         print("="*60)
-        print("0. Exit")
         print("1. Create Datasets")
         print("2. Display Current Dataset")
         if len(dataset_storage) > 1:
@@ -131,11 +261,13 @@ def main():
         if len(dataset_storage) > 1:
             print("5. Cross-Dataset Comparison")
         print("6. List/Display FP/FN Points (best models)")
+        print("7. Training Time Summary")
         print("9. Cleanup")
+        print("0. Exit")
         print("="*60)
 
-        max_option = "9" if len(dataset_storage) > 1 else "6"
-        choice = input(f"Select option (0-{max_option}): ").strip()
+        max_option = "9"
+        choice = input(f"Select option (1-{max_option}, 0 to exit): ").strip()
 
         if choice == "1":
             print("\n" + "="*60)
@@ -152,11 +284,16 @@ def main():
                 except ValueError:
                     print("Invalid value. Keeping existing number of points.")
 
-            dataset_storage, active_dataset, spirals, sampling_method = _generate_datasets(
+            normalize_str = input("Normalize to zero mean/unit variance? (y/N): ").strip().lower()
+            DATA_PARAMS["normalize"] = normalize_str in {"y", "yes"}
+
+            dataset_storage, active_dataset, spirals, sampling_method, norm_stats_by_dataset = _generate_datasets(
                 DATA_PARAMS, active_dataset
             )
             if sampling_method == "ALL":
                 print("Generated RND, CTR, and EDGE datasets")
+            if DATA_PARAMS.get("normalize", False):
+                print("Normalization: enabled (zero mean/unit variance)")
 
             total_points = len(spirals)
             points_per_spiral = DATA_PARAMS["n"]
@@ -174,7 +311,7 @@ def main():
             if not dataset_storage:
                 print("No datasets; recreate datasets first (option 1).")
                 continue
-            if not plot_three_datasets(dataset_storage, DATA_PARAMS):
+            if not plot_three_datasets(dataset_storage, DATA_PARAMS, norm_stats_by_dataset=norm_stats_by_dataset):
                 print("Missing datasets; recreate datasets first (option 1).")
         elif choice == "3" and len(dataset_storage) > 1:
             print("\n" + "="*60)
@@ -216,16 +353,18 @@ def main():
                 for arch_name, hidden_layers in architectures_to_train:
                     print(f"\n  Training {hidden_layers}...")
                     model = MLP(hidden_layers)
-                    trained_model, train_losses, val_losses, test_losses = train_model(
+                    trained_model, train_losses, val_losses, test_losses, train_time_ms = train_model(
                         model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
                         epochs=epochs, lr=lr, verbose=True
                     )
+                    train_time_s = train_time_ms / 1000.0
 
                     trained_models[ds_name][arch_name] = trained_model
                     train_histories[ds_name][arch_name] = {
                         "train_losses": train_losses,
                         "val_losses": val_losses,
-                        "test_losses": test_losses
+                        "test_losses": test_losses,
+                        "train_time_s": train_time_s,
                     }
 
                     total_params = sum(param.numel() for param in trained_model.parameters())
@@ -245,23 +384,41 @@ def main():
                     final_acc = evaluate_model(trained_model, test_loaders[ds_name])
                     all_results[ds_name][arch_name] = final_acc
                     print(f"    Test Accuracy: {final_acc*100:.2f}%")
+                    print(f"    Training time: {train_time_s:.2f} s")
 
             # Display summary comparison
+            points_per_cat = DATA_PARAMS.get("n", "?")
             print("\n" + "="*60)
-            print("TRAINING SUMMARY - ALL DATASETS")
+            print(f"TRAINING SUMMARY - ALL DATASETS {points_per_cat} POINTS PER CAT")
             print("="*60)
-            print(f"{'Architecture':24s} | ", end="")
+
+            arch_col_width = 24
+            acc_col_width = 10
+            time_col_width = 10
+
+            header_parts = [f"{'Architecture':{arch_col_width}s}"]
             for ds_name in dataset_storage.keys():
-                print(f"{ds_name:^10s} | ", end="")
-            print()
-            print("-"*70)
+                header_parts.append(f"{ds_name} %".center(acc_col_width))
+                header_parts.append(f"{ds_name} s".center(time_col_width))
+            header_line = " | ".join(header_parts)
+            print(header_line)
+            print("-" * len(header_line))
 
             for arch_name, hidden_layers in architectures_to_train:
-                print(f"{str(hidden_layers):24s} | ", end="")
+                row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
                 for ds_name in dataset_storage.keys():
                     acc = all_results[ds_name][arch_name]
-                    print(f"{acc*100:9.2f}% | ", end="")
-                print()
+                    time_s = (
+                        train_histories.get(ds_name, {})
+                        .get(arch_name, {})
+                        .get("train_time_s")
+                    )
+                    row_parts.append(f"{acc * 100:9.2f}%")
+                    if time_s is None:
+                        row_parts.append(f"{'--':>9s}")
+                    else:
+                        row_parts.append(f"{time_s:9.2f}")
+                print(" | ".join(row_parts))
 
             ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in train_histories]
             if ordered_datasets:
@@ -313,17 +470,43 @@ def main():
             with open('test_results.txt', 'a') as f:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"\n{'='*60}\n")
+                points_per_cat = DATA_PARAMS.get("n", "?")
                 f.write(f"Multi-Dataset Training Results - {timestamp}\n")
+                f.write(f"ALL DATASETS {points_per_cat} POINTS PER CAT\n")
                 f.write(f"{'='*60}\n")
-                f.write(f"{'Architecture':24s} | ")
+                arch_col_width = 24
+                acc_col_width = 10
+                time_col_width = 10
+
+                header_parts = [f"{'Architecture':{arch_col_width}s}"]
                 for ds_name in dataset_storage.keys():
-                    f.write(f"{ds_name:^10s} | ")
-                f.write("\n" + "-"*70 + "\n")
+                    header_parts.append(f"{ds_name} %".center(acc_col_width))
+                    header_parts.append(f"{ds_name} s".center(time_col_width))
+                header_line = " | ".join(header_parts)
+                f.write(header_line + "\n")
+                f.write("-" * len(header_line) + "\n")
                 for arch_name, hidden_layers in architectures_to_train:
-                    f.write(f"{str(hidden_layers):24s} | ")
+                    row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
                     for ds_name in dataset_storage.keys():
                         acc = all_results[ds_name][arch_name]
-                        f.write(f"{acc*100:9.2f}% | ")
+                        time_s = (
+                            train_histories.get(ds_name, {})
+                            .get(arch_name, {})
+                            .get("train_time_s")
+                        )
+                        row_parts.append(f"{acc * 100:9.2f}%")
+                        if time_s is None:
+                            row_parts.append(f"{'--':>9s}")
+                        else:
+                            row_parts.append(f"{time_s:9.2f}")
+                    f.write(" | ".join(row_parts) + "\n")
+                    f.write(f"{'Train Time s':24s} | ")
+                    for ds_name in dataset_storage.keys():
+                        model_time = train_histories[ds_name].get(arch_name, {}).get("train_time_s")
+                        if model_time is None:
+                            f.write(f"{'n/a':>9s} | ")
+                        else:
+                            f.write(f"{model_time:9.2f} | ")
                     f.write("\n")
                     f.write(f"{'P/R/S/F1':24s} | ")
                     for ds_name in dataset_storage.keys():
@@ -520,7 +703,15 @@ def main():
                 _print_point_list("FN (pred C1, true C2)", fn_points, limit)
 
             if fp_fn_by_dataset:
-                plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset)
+                plot_three_datasets_with_fp_fn(
+                    dataset_storage,
+                    fp_fn_by_dataset,
+                    norm_stats_by_dataset=norm_stats_by_dataset,
+                )
+
+        elif choice == "7":
+            points_per_cat = DATA_PARAMS.get("n", "?")
+            _print_training_time_summary(train_histories, dataset_storage, points_per_cat)
 
         elif choice == "9":
             print("\n" + "="*60)
@@ -566,8 +757,7 @@ def main():
                 print("test_results.txt not found; nothing to trim.")
 
         else:
-            max_valid = 9 if len(dataset_storage) > 1 else 6
-            print(f"Invalid option. Please select 0-{max_valid}.")
+            print("Invalid option. Please select 0-9.")
 
 
 if __name__ == "__main__":
