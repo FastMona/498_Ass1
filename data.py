@@ -65,7 +65,7 @@ def _plot_interlocked_region_boundaries(
 
 def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_dataset=None):
     """Plot side-by-side comparison of RND, CTR, and EDGE sampling methods."""
-    _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+    _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
 
     rnd_count = len(rnd_data)
     ctr_count = len(ctr_data)

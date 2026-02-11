@@ -35,8 +35,10 @@ class MLP(nn.Module):
         Input dimension (default 2 for 2D coordinates)
     output_size : int
         Output dimension (default 1 for binary classification)
+    activation : str
+        Hidden-layer activation: "relu", "tanh", or "leaky_relu" (default "relu")
     """
-    def __init__(self, hidden_layers, input_size=2, output_size=1):
+    def __init__(self, hidden_layers, input_size=2, output_size=1, activation="relu"):
         super(MLP, self).__init__()
 
         # Validate hidden layers
@@ -45,6 +47,15 @@ class MLP(nn.Module):
         if len(hidden_layers) > 5:
             raise ValueError("Maximum 5 hidden layers supported")
 
+        activation_name = str(activation).lower()
+        activation_map = {
+            "relu": nn.ReLU,
+            "tanh": nn.Tanh,
+            "leaky_relu": nn.LeakyReLU,
+        }
+        if activation_name not in activation_map:
+            raise ValueError("activation must be 'relu', 'tanh', or 'leaky_relu'")
+
         # Build layers
         layers = []
         prev_size = input_size
@@ -52,7 +63,7 @@ class MLP(nn.Module):
         # Hidden layers
         for hidden_size in hidden_layers:
             layers.append(nn.Linear(prev_size, hidden_size))
-            layers.append(nn.ReLU())
+            layers.append(activation_map[activation_name]())
             prev_size = hidden_size
 
         # Output layer
@@ -120,7 +131,7 @@ def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
     return train_loader, val_loader, test_loader
 
 
-def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, verbose=True):
+def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, patience=3, verbose=True):
     """
     Train an MLP model with validation set for early stopping.
 
@@ -138,6 +149,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         Number of training epochs
     lr : float
         Learning rate
+    patience : int
+        Early stopping patience (epochs without improvement before stopping)
     verbose : bool
         Print progress
 
@@ -158,7 +171,6 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     test_losses = []
 
     # Early stopping parameters (using validation set)
-    patience = 3
     best_val_loss = float('inf')
     best_model_state = None
     best_epoch = 0

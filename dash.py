@@ -420,6 +420,29 @@ def main():
             lr_str = input("Learning rate (default 0.001): ").strip()
             lr = float(lr_str) if lr_str else 0.001
 
+            activation_str = input(
+                "Hidden activation (1: relu, 2: leaky_relu, 3: tanh; default 1): "
+            ).strip().lower()
+            activation_map = {
+                "1": "relu",
+                "2": "leaky_relu",
+                "3": "tanh",
+                "relu": "relu",
+                "leaky_relu": "leaky_relu",
+                "leaky relu": "leaky_relu",
+                "tanh": "tanh",
+                "": "",
+            }
+            if activation_str not in activation_map:
+                print("Invalid activation. Using relu.")
+                activation = "relu"
+            else:
+                activation = activation_map[activation_str] or "relu"
+            print(f"Using activation: {activation}")
+
+            patience_str = input("Early stopping patience (default 3): ").strip()
+            patience = int(patience_str) if patience_str else 3
+
             # Train on all datasets
             all_results = {}  # {dataset: {model_name: accuracy}}
             for ds_name in dataset_storage.keys():
@@ -430,10 +453,10 @@ def main():
 
                 for arch_name, hidden_layers in architectures_to_train:
                     print(f"\n  Training {hidden_layers}...")
-                    model = MLP(hidden_layers)
+                    model = MLP(hidden_layers, activation=activation)
                     trained_model, train_losses, val_losses, test_losses, train_time_ms = train_model(
                         model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
-                        epochs=epochs, lr=lr, verbose=True
+                        epochs=epochs, lr=lr, patience=patience, verbose=True
                     )
                     train_time_s = train_time_ms / 1000.0
 
@@ -466,8 +489,9 @@ def main():
 
             # Display summary comparison
             points_per_cat = DATA_PARAMS.get("n", "?")
+            total_points = 2 * points_per_cat if isinstance(points_per_cat, int) else "?"
             print("\n" + "="*60)
-            print(f"TRAINING SUMMARY - ALL DATASETS {points_per_cat} POINTS PER CAT")
+            print(f"TRAINING SUMMARY - TOTAL POINTS: {total_points}, {activation.upper()} ACTIVATION")
             print("="*60)
 
             arch_col_width = 24
@@ -549,8 +573,8 @@ def main():
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"\n{'='*60}\n")
                 points_per_cat = DATA_PARAMS.get("n", "?")
-                f.write(f"Multi-Dataset Training Results - {timestamp}\n")
-                f.write(f"ALL DATASETS {points_per_cat} POINTS PER CAT\n")
+                total_points = 2 * points_per_cat if isinstance(points_per_cat, int) else "?"
+                f.write(f"TRAINING SUMMARY - TOTAL POINTS: {total_points}, {activation.upper()} ACTIVATION - {timestamp}\n")
                 f.write(f"{'='*60}\n")
                 arch_col_width = 24
                 acc_col_width = 10
