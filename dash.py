@@ -12,7 +12,9 @@ from data import (
 )
 from MLPx6 import (
     MLP,
+    CPN,
     MLP_ARCHITECTURES,
+    CPN_PARAMS,
     prepare_data,
     train_model,
     evaluate_model,
@@ -470,9 +472,25 @@ def main():
                 print(f"{'='*60}")
                 all_results[ds_name] = {}
 
-                for arch_name, hidden_layers in architectures_to_train:
-                    print(f"\n  Training {hidden_layers}...")
-                    model = MLP(hidden_layers, activation=activation)
+                for arch_name, arch_config in architectures_to_train:
+                    # Create model based on architecture type
+                    if isinstance(arch_config, dict):
+                        if arch_config.get("type") == "CPN":
+                            print(f"\n  Training CPN with {arch_config['n_kohonen']} Kohonen neurons...")
+                            model = CPN(
+                                n_kohonen=arch_config['n_kohonen'],
+                                learning_rate_kohonen=CPN_PARAMS['learning_rate_kohonen'],
+                                learning_rate_grossberg=CPN_PARAMS['learning_rate_grossberg']
+                            )
+                        else:  # MLP
+                            hidden_layers = arch_config.get('hidden_layers', [])
+                            print(f"\n  Training MLP {hidden_layers}...")
+                            model = MLP(hidden_layers, activation=activation)
+                    else:
+                        # Legacy support: if arch_config is a list
+                        print(f"\n  Training {arch_config}...")
+                        model = MLP(arch_config, activation=activation)
+                    
                     trained_model, train_losses, val_losses, test_losses, train_time_ms = train_model(
                         model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
                         epochs=epochs, lr=lr, patience=patience, verbose=True, optimizer_type=optimizer_type
@@ -525,8 +543,17 @@ def main():
             print(header_line)
             print("-" * len(header_line))
 
-            for arch_name, hidden_layers in architectures_to_train:
-                row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
+            for arch_name, arch_config in architectures_to_train:
+                # Format architecture display
+                if isinstance(arch_config, dict):
+                    if arch_config.get("type") == "CPN":
+                        arch_display = f"{arch_name} (K={arch_config['n_kohonen']})"
+                    else:
+                        arch_display = f"{arch_name} {arch_config.get('hidden_layers', [])}"
+                else:
+                    arch_display = f"{arch_name} {arch_config}"
+                
+                row_parts = [f"{arch_display:{arch_col_width}s}"]
                 for ds_name in dataset_storage.keys():
                     acc = all_results[ds_name][arch_name]
                     row_parts.append(f"{acc * 100:9.2f}%")
@@ -595,8 +622,17 @@ def main():
                 header_line = " | ".join(header_parts)
                 f.write(header_line + "\n")
                 f.write("-" * len(header_line) + "\n")
-                for arch_name, hidden_layers in architectures_to_train:
-                    row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
+                for arch_name, arch_config in architectures_to_train:
+                    # Format architecture display
+                    if isinstance(arch_config, dict):
+                        if arch_config.get("type") == "CPN":
+                            arch_display = f"{arch_name} (K={arch_config['n_kohonen']})"
+                        else:
+                            arch_display = f"{arch_name} {arch_config.get('hidden_layers', [])}"
+                    else:
+                        arch_display = f"{arch_name} {arch_config}"
+                    
+                    row_parts = [f"{arch_display:{arch_col_width}s}"]
                     for ds_name in dataset_storage.keys():
                         acc = all_results[ds_name][arch_name]
                         row_parts.append(f"{acc * 100:9.2f}%")

@@ -8,17 +8,23 @@ import time
 
 
 # ============================
-# MLP Architectures (easily modifiable)
+# Network Architectures (MLP and CPN)
 # ============================
 
 MLP_ARCHITECTURES = {
-    "MLP_0": [],                        # No hidden layers (logistic regression)
-    "MLP_1": [16],                  # 16 node hidden layer
-    "MLP_2": [32],                  # 64 node hidden layers
-    "MLP_3": [32, 32],                # 3 hidden layers
-    "MLP_4": [64],                # 4
-    "MLP_5": [64, 64],                # 5
-    "MLP_6": [64, 64, 64],                # 6 (duplicate of MLP_5 for now)
+    "MLP_0": {"type": "MLP", "hidden_layers": []},                    # No hidden layers (logistic regression)
+    "MLP_1": {"type": "MLP", "hidden_layers": [16]},                 # 16 node hidden layer
+    "MLP_2": {"type": "MLP", "hidden_layers": [32]},                 # 32 node hidden layer
+    "MLP_3": {"type": "MLP", "hidden_layers": [32, 32]},             # 2 hidden layers of 32 each
+    "CPN_4": {"type": "CPN", "n_kohonen": 64},                       # Counter Propagation Network: 64 Kohonen neurons
+    "CPN_5": {"type": "CPN", "n_kohonen": 128},                      # Counter Propagation Network: 128 Kohonen neurons
+    "CPN_6": {"type": "CPN", "n_kohonen": 256},                      # Counter Propagation Network: 256 Kohonen neurons
+}
+
+# CPN-specific parameters
+CPN_PARAMS = {
+    "learning_rate_kohonen": 0.1,      # Learning rate for Kohonen layer (competitive learning)
+    "learning_rate_grossberg": 0.01,   # Learning rate for Grossberg layer (supervised learning)
 }
 
 
@@ -74,6 +80,88 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.network(x)
+
+
+class CPN(nn.Module):
+    """
+    Counter Propagation Network (CPN) for binary classification.
+    
+    A CPN consists of two layers:
+    1. Kohonen layer (competitive/clustering layer) - unsupervised learning
+    2. Grossberg layer (output layer) - supervised learning
+    
+    Parameters:
+    -----------
+    n_kohonen : int
+        Number of neurons in the Kohonen (competitive) layer
+    input_size : int
+        Input dimension (default 2 for 2D coordinates)
+    output_size : int
+        Output dimension (default 1 for binary classification)
+    learning_rate_kohonen : float
+        Learning rate for Kohonen layer weight updates (default 0.1)
+    learning_rate_grossberg : float
+        Learning rate for Grossberg layer (default 0.01)
+    """
+    def __init__(self, n_kohonen, input_size=2, output_size=1, 
+                 learning_rate_kohonen=0.1, learning_rate_grossberg=0.01):
+        super(CPN, self).__init__()
+        
+        if n_kohonen <= 0:
+            raise ValueError("n_kohonen must be positive")
+        
+        self.n_kohonen = n_kohonen
+        self.input_size = input_size
+        self.output_size = output_size
+        self.lr_kohonen = learning_rate_kohonen
+        self.lr_grossberg = learning_rate_grossberg
+        
+        # Kohonen layer weights (competitive layer)
+        self.kohonen_weights = nn.Parameter(torch.randn(n_kohonen, input_size))
+        with torch.no_grad():
+            self.kohonen_weights.data = nn.functional.normalize(self.kohonen_weights.data, dim=1)
+        
+        # Grossberg layer (output layer)
+        self.grossberg = nn.Linear(n_kohonen, output_size)
+        self.sigmoid = nn.Sigmoid()
+        
+        # Track neuron activation counts
+        self.neuron_counts = torch.zeros(n_kohonen)
+    
+    def find_winner(self, x):
+        """Find winning Kohonen neuron using Euclidean distance."""
+        x_norm = nn.functional.normalize(x, dim=1)
+        distances = torch.cdist(x_norm.unsqueeze(1), 
+                               self.kohonen_weights.unsqueeze(0)).squeeze(1)
+        winners = torch.argmin(distances, dim=1)
+        return winners, distances
+    
+    def kohonen_forward(self, x):
+        """Forward pass through Kohonen layer."""
+        winners, _ = self.find_winner(x)
+        kohonen_output = torch.zeros(x.size(0), self.n_kohonen, device=x.device)
+        kohonen_output.scatter_(1, winners.unsqueeze(1), 1.0)
+        return kohonen_output, winners
+    
+    def forward(self, x):
+        """Full forward pass through the CPN."""
+        kohonen_output, winners = self.kohonen_forward(x)
+        output = self.grossberg(kohonen_output)
+        output = self.sigmoid(output)
+        return output, winners
+    
+    def update_kohonen(self, x, winners):
+        """Update Kohonen layer weights using competitive learning rule."""
+        with torch.no_grad():
+            x_norm = nn.functional.normalize(x, dim=1)
+            for i, winner_idx in enumerate(winners):
+                self.kohonen_weights[winner_idx] += self.lr_kohonen * (
+                    x_norm[i] - self.kohonen_weights[winner_idx]
+                )
+                self.neuron_counts[winner_idx] += 1
+            self.kohonen_weights.data = nn.functional.normalize(
+                self.kohonen_weights.data, dim=1
+            )
 
 
 def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
@@ -133,12 +221,12 @@ def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
 
 def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, patience=3, verbose=True, optimizer_type="adam"):
     """
-    Train an MLP model with validation set for early stopping.
+    Train an MLP or CPN model with validation set for early stopping.
 
     Parameters:
     -----------
     model : nn.Module
-        The model to train
+        The model to train (MLP or CPN)
     train_loader : DataLoader
         Training data loader (60% of data)
     val_loader : DataLoader
@@ -164,12 +252,23 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         Elapsed time used for training in milliseconds
     """
     criterion = nn.BCELoss()
-    if optimizer_type == "adam":
-        optimizer = optim.Adam(model.parameters(), lr=lr)
-    elif optimizer_type == "sgd":
-        optimizer = optim.SGD(model.parameters(), lr=lr)
+    is_cpn = isinstance(model, CPN)
+    
+    # For CPN, only optimize Grossberg layer
+    if is_cpn:
+        if optimizer_type == "adam":
+            optimizer = optim.Adam(model.grossberg.parameters(), lr=lr)
+        elif optimizer_type == "sgd":
+            optimizer = optim.SGD(model.grossberg.parameters(), lr=lr)
+        else:
+            raise ValueError("optimizer_type must be 'adam' or 'sgd'")
     else:
-        raise ValueError("optimizer_type must be 'adam' or 'sgd'")
+        if optimizer_type == "adam":
+            optimizer = optim.Adam(model.parameters(), lr=lr)
+        elif optimizer_type == "sgd":
+            optimizer = optim.SGD(model.parameters(), lr=lr)
+        else:
+            raise ValueError("optimizer_type must be 'adam' or 'sgd'")
 
     train_losses = []
     val_losses = []
@@ -185,10 +284,17 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
 
     for epoch in range(epochs):
         # Training phase
+        model.train()
         train_loss = 0.0
         for x_batch, y_batch in train_loader:
             optimizer.zero_grad()
-            outputs = model(x_batch)
+            
+            if is_cpn:
+                outputs, winners = model(x_batch)
+                model.update_kohonen(x_batch, winners)
+            else:
+                outputs = model(x_batch)
+            
             loss = criterion(outputs, y_batch)
             loss.backward()
             optimizer.step()
@@ -198,10 +304,14 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         train_losses.append(train_loss)
 
         # Validation phase (for early stopping)
+        model.eval()
         val_loss = 0.0
         with torch.no_grad():
             for x_batch, y_batch in val_loader:
-                outputs = model(x_batch)
+                if is_cpn:
+                    outputs, _ = model(x_batch)
+                else:
+                    outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
                 val_loss += loss.item()
 
@@ -221,7 +331,10 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         test_loss = 0.0
         with torch.no_grad():
             for x_batch, y_batch in test_loader:
-                outputs = model(x_batch)
+                if is_cpn:
+                    outputs, _ = model(x_batch)
+                else:
+                    outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
                 test_loss += loss.item()
 
@@ -257,10 +370,14 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
 def confusion_counts(model, test_loader):
     """Return confusion counts (TN, FP, FN, TP) on the test set."""
     model.eval()
+    is_cpn = isinstance(model, CPN)
     tn = fp = fn = tp = 0
     with torch.no_grad():
         for x_batch, y_batch in test_loader:
-            outputs = model(x_batch)
+            if is_cpn:
+                outputs, _ = model(x_batch)
+            else:
+                outputs = model(x_batch)
             predicted = (outputs > 0.5).float()
             tn += ((predicted == 0) & (y_batch == 0)).sum().item()
             fp += ((predicted == 1) & (y_batch == 0)).sum().item()
@@ -276,7 +393,7 @@ def predict(model, x, y):
     Parameters:
     -----------
     model : nn.Module
-        Trained model
+        Trained model (MLP or CPN)
     x, y : float
         Coordinates of the point
 
@@ -286,9 +403,14 @@ def predict(model, x, y):
     confidence : float between 0 and 1
     """
     model.eval()
+    is_cpn = isinstance(model, CPN)
     with torch.no_grad():
         input_tensor = torch.tensor([[x, y]], dtype=torch.float32)
-        output = model(input_tensor).item()
+        if is_cpn:
+            output, _ = model(input_tensor)
+            output = output.item()
+        else:
+            output = model(input_tensor).item()
 
     prediction = 1 if output > 0.5 else 0
     confidence = output if prediction == 1 else (1 - output)
@@ -303,7 +425,7 @@ def evaluate_model(model, test_loader):
     Parameters:
     -----------
     model : nn.Module
-        Trained model
+        Trained model (MLP or CPN)
     test_loader : DataLoader
         Testing data loader
 
@@ -312,12 +434,16 @@ def evaluate_model(model, test_loader):
     accuracy : float between 0 and 1
     """
     model.eval()
+    is_cpn = isinstance(model, CPN)
     correct = 0
     total = 0
 
     with torch.no_grad():
         for x_batch, y_batch in test_loader:
-            outputs = model(x_batch)
+            if is_cpn:
+                outputs, _ = model(x_batch)
+            else:
+                outputs = model(x_batch)
             predicted = (outputs > 0.5).float()
             total += y_batch.size(0)
             correct += (predicted == y_batch).sum().item()
@@ -349,8 +475,15 @@ def plot_learning_curves(train_histories, title="Learning Curves", fig=None):
         if train_losses:
             epochs = range(1, len(train_losses) + 1)
             # Get architecture from MLP_ARCHITECTURES dictionary
-            arch = MLP_ARCHITECTURES.get(model_name, [])
-            plt.plot(epochs, train_losses, label=f"{arch}")
+            arch = MLP_ARCHITECTURES.get(model_name, {})
+            if isinstance(arch, dict):
+                if arch.get("type") == "CPN":
+                    label = f"{model_name} (K={arch.get('n_kohonen', '?')})"
+                else:
+                    label = f"{model_name} {arch.get('hidden_layers', [])}"
+            else:
+                label = f"{model_name} {arch}"
+            plt.plot(epochs, train_losses, label=label)
 
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
@@ -365,7 +498,9 @@ def plot_learning_curves(train_histories, title="Learning Curves", fig=None):
 
 __all__ = [
     "MLP_ARCHITECTURES",
+    "CPN_PARAMS",
     "MLP",
+    "CPN",
     "prepare_data",
     "train_model",
     "predict",
