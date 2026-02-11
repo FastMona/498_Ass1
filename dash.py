@@ -273,7 +273,7 @@ def main():
         if len(dataset_storage) > 1:
             print("5. Cross-Dataset Comparison")
         print("6. List/Display FP/FN Points (best models)")
-        print("7. Training Time Summary")
+        print("7. Training Summary")
         print("9. Cleanup")
         print("0. Exit")
         print("="*60)
@@ -345,6 +345,11 @@ def main():
                 DATA_PARAMS, active_dataset
             )
             if sampling_method == "ALL":
+                # Confirmation of user input choices
+                print("\n--- DATASET GENERATION CONFIRMATION ---")
+                print(f"Split: {100 - split_params['test_split']*100 - split_params['val_split']*(1-split_params['test_split'])*100:.0f}% train / {split_params['val_split']*(1-split_params['test_split'])*100:.0f}% validation / {split_params['test_split']*100:.0f}% test")
+                print(f"Points per region: {DATA_PARAMS['n']}")
+                print(f"Normalization: {'enabled' if DATA_PARAMS.get('normalize', False) else 'disabled'}")
                 print("Generated RND, CTR, and EDGE datasets")
             if DATA_PARAMS.get("normalize", False):
                 print("Normalization: enabled (zero mean/unit variance)")
@@ -352,7 +357,6 @@ def main():
             total_points = len(spirals)
             points_per_spiral = DATA_PARAMS["n"]
             print(f"Total points: {total_points} ({points_per_spiral} per spiral)")
-            print(f"Active dataset for training: {active_dataset}")
 
             train_loaders, val_loaders, test_loaders, trained_models, train_histories = _init_dataloaders(
                 dataset_storage, batch_size=32, test_split=split_params["test_split"], val_split=split_params["val_split"]
@@ -417,8 +421,23 @@ def main():
             epochs_str = input("Number of epochs (default 100): ").strip()
             epochs = int(epochs_str) if epochs_str else 100
 
-            lr_str = input("Learning rate (default 0.001): ").strip()
-            lr = float(lr_str) if lr_str else 0.001
+
+            optimizer_type_str = input("Optimizer (1: Adam [default], 2: SGD): ").strip().lower()
+            optimizer_type_map = {"1": "adam", "2": "sgd", "adam": "adam", "sgd": "sgd", "": "adam"}
+            if optimizer_type_str not in optimizer_type_map:
+                print("Invalid optimizer. Using Adam.")
+                optimizer_type = "adam"
+            else:
+                optimizer_type = optimizer_type_map[optimizer_type_str]
+
+            if optimizer_type == "adam":
+                lr_default = 0.001
+            else:
+                lr_default = 0.01
+
+            lr_str = input(f"Learning rate (default {lr_default}): ").strip()
+            lr = float(lr_str) if lr_str else lr_default
+            print(f"Selected optimizer: {optimizer_type.upper()} | Learning rate: {lr}")
 
             activation_str = input(
                 "Hidden activation (1: relu, 2: leaky_relu, 3: tanh; default 1): "
@@ -456,7 +475,7 @@ def main():
                     model = MLP(hidden_layers, activation=activation)
                     trained_model, train_losses, val_losses, test_losses, train_time_ms = train_model(
                         model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
-                        epochs=epochs, lr=lr, patience=patience, verbose=True
+                        epochs=epochs, lr=lr, patience=patience, verbose=True, optimizer_type=optimizer_type
                     )
                     train_time_s = train_time_ms / 1000.0
 
@@ -466,6 +485,7 @@ def main():
                         "val_losses": val_losses,
                         "test_losses": test_losses,
                         "train_time_s": train_time_s,
+                        "accuracy": None,  # will be set below
                     }
 
                     total_params = sum(param.numel() for param in trained_model.parameters())
@@ -484,6 +504,7 @@ def main():
                     )
                     final_acc = evaluate_model(trained_model, test_loaders[ds_name])
                     all_results[ds_name][arch_name] = final_acc
+                    train_histories[ds_name][arch_name]["accuracy"] = final_acc
                     print(f"    Test Accuracy: {final_acc*100:.2f}%")
                     print(f"    Training time: {train_time_s:.2f} s")
 
@@ -496,12 +517,10 @@ def main():
 
             arch_col_width = 24
             acc_col_width = 10
-            time_col_width = 10
 
             header_parts = [f"{'Architecture':{arch_col_width}s}"]
             for ds_name in dataset_storage.keys():
                 header_parts.append(f"{ds_name} %".center(acc_col_width))
-                header_parts.append(f"{ds_name} s".center(time_col_width))
             header_line = " | ".join(header_parts)
             print(header_line)
             print("-" * len(header_line))
@@ -510,16 +529,7 @@ def main():
                 row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
                 for ds_name in dataset_storage.keys():
                     acc = all_results[ds_name][arch_name]
-                    time_s = (
-                        train_histories.get(ds_name, {})
-                        .get(arch_name, {})
-                        .get("train_time_s")
-                    )
                     row_parts.append(f"{acc * 100:9.2f}%")
-                    if time_s is None:
-                        row_parts.append(f"{'--':>9s}")
-                    else:
-                        row_parts.append(f"{time_s:9.2f}")
                 print(" | ".join(row_parts))
 
             ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in train_histories]
@@ -578,12 +588,10 @@ def main():
                 f.write(f"{'='*60}\n")
                 arch_col_width = 24
                 acc_col_width = 10
-                time_col_width = 10
 
                 header_parts = [f"{'Architecture':{arch_col_width}s}"]
                 for ds_name in dataset_storage.keys():
                     header_parts.append(f"{ds_name} %".center(acc_col_width))
-                    header_parts.append(f"{ds_name} s".center(time_col_width))
                 header_line = " | ".join(header_parts)
                 f.write(header_line + "\n")
                 f.write("-" * len(header_line) + "\n")
@@ -591,35 +599,9 @@ def main():
                     row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
                     for ds_name in dataset_storage.keys():
                         acc = all_results[ds_name][arch_name]
-                        time_s = (
-                            train_histories.get(ds_name, {})
-                            .get(arch_name, {})
-                            .get("train_time_s")
-                        )
                         row_parts.append(f"{acc * 100:9.2f}%")
-                        if time_s is None:
-                            row_parts.append(f"{'--':>9s}")
-                        else:
-                            row_parts.append(f"{time_s:9.2f}")
                     f.write(" | ".join(row_parts) + "\n")
-                    f.write(f"{'Train Time s':24s} | ")
-                    for ds_name in dataset_storage.keys():
-                        model_time = train_histories[ds_name].get(arch_name, {}).get("train_time_s")
-                        if model_time is None:
-                            f.write(f"{'n/a':>9s} | ")
-                        else:
-                            f.write(f"{model_time:9.2f} | ")
-                    f.write("\n")
-                    f.write(f"{'P/R/S/F1':24s} | ")
-                    for ds_name in dataset_storage.keys():
-                        model = trained_models[ds_name][arch_name]
-                        tn, fp, fn, tp = confusion_counts(model, test_loaders[ds_name])
-                        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-                        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-                        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
-                        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-                        f.write(f"{precision:.3f}/{recall:.3f}/{specificity:.3f}/{f1:.3f} | ")
-                    f.write("\n")
+                    # Remove P/R/S/F1 and duplicate train time row from file output
 
             print("\nResults saved to test_results.txt")
 
@@ -813,7 +795,116 @@ def main():
 
         elif choice == "7":
             points_per_cat = DATA_PARAMS.get("n", "?")
-            _print_training_time_summary(train_histories, dataset_storage, points_per_cat)
+            ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage]
+            model_names = [
+                name for name in MLP_ARCHITECTURES.keys()
+                if any(name in train_histories.get(ds, {}) for ds in ordered_datasets)
+            ]
+            if not model_names:
+                print("No recorded training times found.")
+                continue
+
+            # 1. Accuracy Table
+            print("\n" + "="*60)
+            print(f"TRAINING SUMMARY - ACCURACY (%), {points_per_cat} POINTS PER CAT")
+            print("="*60)
+            arch_col_width = 24
+            acc_col_width = 10
+            header_parts = [f"{'Architecture':{arch_col_width}s}"]
+            for ds_name in ordered_datasets:
+                header_parts.append(f"{ds_name} %".center(acc_col_width))
+            header_line = " | ".join(header_parts)
+            print(header_line)
+            print("-" * len(header_line))
+            accuracy_table_lines = [header_line, "-" * len(header_line)]
+            for model_name in model_names:
+                arch = MLP_ARCHITECTURES.get(model_name, [])
+                row_parts = [f"{str(arch):{arch_col_width}s}"]
+                for ds_name in ordered_datasets:
+                    acc = train_histories.get(ds_name, {}).get(model_name, {}).get("accuracy")
+                    row_parts.append(f"{acc * 100:9.2f}%" if acc is not None else f"{'--':>9s}")
+                line = " | ".join(row_parts)
+                print(line)
+                accuracy_table_lines.append(line)
+
+            # 2. CPU Time Table
+            print("\n" + "="*60)
+            print(f"TRAINING TIME SUMMARY - {points_per_cat} POINTS PER CAT")
+            print("="*60)
+            model_col_width = 34
+            time_col_width = 10
+            header_parts = [f"{'Model (arch)':{model_col_width}s}"]
+            for ds_name in ordered_datasets:
+                header_parts.append(f"{ds_name} s".center(time_col_width))
+            header_parts.append("avg s".center(time_col_width))
+            header_line = " | ".join(header_parts)
+            print(header_line)
+            print("-" * len(header_line))
+            cpu_time_table_lines = [header_line, "-" * len(header_line)]
+            for model_name in model_names:
+                arch = MLP_ARCHITECTURES.get(model_name, [])
+                label = f"{model_name} {arch}"
+                if len(label) > model_col_width:
+                    label = label[:model_col_width - 3] + "..."
+                row_parts = [f"{label:{model_col_width}s}"]
+                times = []
+                for ds_name in ordered_datasets:
+                    time_s = train_histories.get(ds_name, {}).get(model_name, {}).get("train_time_s")
+                    if time_s is None:
+                        row_parts.append(f"{'--':>9s}")
+                    else:
+                        row_parts.append(f"{time_s:9.2f}")
+                        times.append(time_s)
+                avg_time = sum(times) / len(times) if times else None
+                row_parts.append(f"{avg_time:9.2f}" if avg_time is not None else f"{'--':>9s}")
+                line = " | ".join(row_parts)
+                print(line)
+                cpu_time_table_lines.append(line)
+
+            # 3. P/R/S/F1 Table
+            print("\n" + "="*60)
+            print(f"PRECISION / RECALL / SPECIFICITY / F1 SUMMARY - {points_per_cat} POINTS PER CAT")
+            print("="*60)
+            header_parts = [f"{'Architecture':{arch_col_width}s}"]
+            for ds_name in ordered_datasets:
+                header_parts.append(f"{ds_name} P/R/S/F1".center(24))
+            header_line = " | ".join(header_parts)
+            print(header_line)
+            print("-" * len(header_line))
+            prsf1_table_lines = [header_line, "-" * len(header_line)]
+            for model_name in model_names:
+                arch = MLP_ARCHITECTURES.get(model_name, [])
+                row_parts = [f"{str(arch):{arch_col_width}s}"]
+                for ds_name in ordered_datasets:
+                    model = trained_models.get(ds_name, {}).get(model_name)
+                    if model is None:
+                        row_parts.append(f"{'--':>23s}")
+                        continue
+                    tn, fp, fn, tp = confusion_counts(model, test_loaders[ds_name])
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+                    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+                    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+                    row_parts.append(f"{precision:.3f}/{recall:.3f}/{specificity:.3f}/{f1:.3f}".center(24))
+                line = " | ".join(row_parts)
+                print(line)
+                prsf1_table_lines.append(line)
+
+            # Write all tables to test_results.txt
+            with open('test_results.txt', 'a') as f:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"\n{'='*60}\n")
+                f.write(f"TRAINING SUMMARY - {timestamp}\n")
+                f.write(f"{'='*60}\n")
+                f.write("\nACCURACY TABLE\n")
+                for line in accuracy_table_lines:
+                    f.write(line + "\n")
+                f.write("\nCPU TIME TABLE\n")
+                for line in cpu_time_table_lines:
+                    f.write(line + "\n")
+                f.write("\nP/R/S/F1 TABLE\n")
+                for line in prsf1_table_lines:
+                    f.write(line + "\n")
 
         elif choice == "9":
             print("\n" + "="*60)

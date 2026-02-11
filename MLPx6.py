@@ -131,7 +131,7 @@ def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
     return train_loader, val_loader, test_loader
 
 
-def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, patience=3, verbose=True):
+def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, patience=3, verbose=True, optimizer_type="adam"):
     """
     Train an MLP model with validation set for early stopping.
 
@@ -164,7 +164,12 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         Elapsed time used for training in milliseconds
     """
     criterion = nn.BCELoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    if optimizer_type == "adam":
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+    elif optimizer_type == "sgd":
+        optimizer = optim.SGD(model.parameters(), lr=lr)
+    else:
+        raise ValueError("optimizer_type must be 'adam' or 'sgd'")
 
     train_losses = []
     val_losses = []
