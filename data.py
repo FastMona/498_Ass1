@@ -55,12 +55,24 @@ def _plot_interlocked_region_boundaries(
     c1_x, c1_y = build_c1_boundary()
     c2_x, c2_y = -c1_x, -c1_y - 1.0
 
+    c2_points = np.column_stack([c2_x, c2_y])
+    c2_keep = ~_C1_PATH.contains_points(c2_points, radius=1e-9)
+
+
     c1_x, c1_y = _apply_normalization(c1_x, c1_y, norm_stats)
     c2_x, c2_y = _apply_normalization(c2_x, c2_y, norm_stats)
 
     ax.fill(c1_x, c1_y, color="#CCE5FF", alpha=0.7, zorder=0)
     ax.fill(c2_x, c2_y, color="#FFE5CC", alpha=0.7, zorder=0)
     ax.plot(c1_x, c1_y, color="tab:blue", lw=2.5, zorder=1)
+    c2_x = np.where(c2_keep, c2_x, np.nan)
+    c2_y = np.where(c2_keep, c2_y, np.nan)
+    ax.plot(c2_x, c2_y, color="tab:orange", lw=2.5, zorder=1)
+
+    seg_y = np.array([-3.0, -2.0])
+    seg_x = np.zeros_like(seg_y)
+    seg_x, seg_y = _apply_normalization(seg_x, seg_y, norm_stats)
+    ax.plot(seg_x, seg_y, color="tab:orange", lw=2.5, zorder=1)
 
 
 def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_dataset=None):

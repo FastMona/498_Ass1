@@ -114,4 +114,3 @@ def plot_regions() -> None:
 
 if __name__ == "__main__":
 	plot_regions()
-
