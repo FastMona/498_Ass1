@@ -45,20 +45,12 @@ def _apply_normalization(x, y, norm_stats):
     return (x - mean[0]) / std[0], (y - mean[1]) / std[1]
 
 
-def _plot_interlocked_region_boundaries(
-    ax,
-    bounds,
-    grid_res=400,
-    remove_x0_ranges=None,
-    norm_stats=None,
-):
+def _plot_interlocked_region_boundaries(ax, norm_stats=None):
     c1_x, c1_y = build_c1_boundary()
     c2_x, c2_y = -c1_x, -c1_y - 1.0
 
     c2_points = np.column_stack([c2_x, c2_y])
     c2_keep = ~_C1_PATH.contains_points(c2_points, radius=1e-9)
-
-
     c1_x, c1_y = _apply_normalization(c1_x, c1_y, norm_stats)
     c2_x, c2_y = _apply_normalization(c2_x, c2_y, norm_stats)
 
@@ -101,15 +93,11 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     x_c2_edge = [p[0] for p in edge_data if p[2] == 1]
     y_c2_edge = [p[1] for p in edge_data if p[2] == 1]
 
-    bounds = (-2.5, 2.5, -3.5, 2.5)
-
     # Plot RND (left subplot)
     ax1.plot(x_c1_rnd, y_c1_rnd, '.', label='C1', alpha=0.6, markersize=3)
     ax1.plot(x_c2_rnd, y_c2_rnd, '.', label='C2', alpha=0.6, markersize=3)
     _plot_interlocked_region_boundaries(
         ax1,
-        bounds,
-        remove_x0_ranges=[(-1, 0), (1, 2)],
         norm_stats=(norm_stats_by_dataset or {}).get("RND"),
     )
     ax1.set_xlabel('$x_1$')
@@ -124,13 +112,11 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     ax2.plot(x_c2_ctr, y_c2_ctr, '.', label='C2', alpha=0.6, markersize=3)
     _plot_interlocked_region_boundaries(
         ax2,
-        bounds,
-        remove_x0_ranges=[(-1, 0), (1, 2)],
         norm_stats=(norm_stats_by_dataset or {}).get("CTR"),
     )
     ax2.set_xlabel('$x_1$')
     ax2.set_ylabel('$x_2$')
-    ax2.set_title(f'CTR (Center-Weighted Sampling at (0, -0.5)) - {ctr_count} points')
+    ax2.set_title(f'CTR (Center-Weighted Sampling at region centroids) - {ctr_count} points')
     ax2.set_aspect('equal', 'box')
     ax2.grid(True, alpha=0.3)
     ax2.legend()
@@ -140,8 +126,6 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     ax3.plot(x_c2_edge, y_c2_edge, '.', label='C2', alpha=0.6, markersize=3)
     _plot_interlocked_region_boundaries(
         ax3,
-        bounds,
-        remove_x0_ranges=[(-1, 0), (1, 2)],
         norm_stats=(norm_stats_by_dataset or {}).get("EDGE"),
     )
     ax3.set_xlabel('$x_1$')
@@ -165,8 +149,6 @@ def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset, norm_stats
         ("EDGE", dataset_storage.get("EDGE"), ax3),
     ]
 
-    bounds = (-2.5, 2.5, -3.5, 2.5)
-
     for ds_name, data, ax in panels:
         if not data:
             ax.set_axis_off()
@@ -181,8 +163,6 @@ def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset, norm_stats
         ax.plot(x_c2, y_c2, '.', label='C2', alpha=0.6, markersize=3)
         _plot_interlocked_region_boundaries(
             ax,
-            bounds,
-            remove_x0_ranges=[(-1, 0), (1, 2)],
             norm_stats=(norm_stats_by_dataset or {}).get(ds_name),
         )
 
@@ -232,6 +212,14 @@ def generate_intertwined_spirals(
     -----------
     n : int
         Number of points per region (default 600)
+    noise_std : float
+        Standard deviation for Gaussian noise added to samples
+    seed : int or None
+        RNG seed for reproducible sampling
+    plot : bool
+        Whether to plot generated samples
+    sampling_method : str
+        "RND", "CTR", "EDGE", or "ALL"
     """
     rng = np.random.default_rng(seed)
 
@@ -370,12 +358,7 @@ def generate_intertwined_spirals(
         _, ax = plt.subplots(figsize=(8, 8))
         ax.plot(c1[:, 0], c1[:, 1], '.', label='C1', alpha=0.6)
         ax.plot(c2[:, 0], c2[:, 1], '.', label='C2', alpha=0.6)
-        bounds = (-2.5, 2.5, -3.5, 2.5)
-        _plot_interlocked_region_boundaries(
-            ax,
-            bounds,
-            remove_x0_ranges=[(-1, 0), (1, 2)]
-        )
+        _plot_interlocked_region_boundaries(ax)
         ax.set_xlabel('$x_1$')
         ax.set_ylabel('$x_2$')
         ax.set_title('Interlocked Annulus Regions')
@@ -433,17 +416,14 @@ def plot_dataset(spirals, data_params, active_dataset, plot_fig=None, norm_stats
     plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
     plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
 
-    bounds = (-2.5, 2.5, -3.5, 2.5)
-
     _plot_interlocked_region_boundaries(
         plt.gca(),
-        bounds,
-        remove_x0_ranges=[(-1, 0), (1, 2)],
         norm_stats=norm_stats,
     )
     plt.xlabel('$x_1$')
     plt.ylabel('$x_2$')
-    plt.title(f'Interlocked Annulus Regions Dataset ({active_dataset})')
+    n_points = data_params.get("n", "?") if isinstance(data_params, dict) else "?"
+    plt.title(f'Interlocked Annulus Regions Dataset ({active_dataset}, n={n_points})')
     plt.axis('equal')
     plt.grid(True, alpha=0.3)
     plt.legend()

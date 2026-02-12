@@ -22,8 +22,7 @@ from MLPx6 import (
 
 
 def _generate_datasets(data_params, active_dataset):
-    sampling_method = "ALL"
-    data_params["sampling_method"] = sampling_method
+    sampling_method = data_params.get("sampling_method", "ALL")
     dataset_storage = {}
     norm_stats_by_dataset = {}
 
@@ -128,6 +127,13 @@ def _read_float(prompt, default, min_value=1e-12):
     except ValueError:
         print(f"Invalid value. Using default {default}.")
         return default
+
+
+def _split_percentages(split_params):
+    test_pct = split_params["test_split"] * 100
+    val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
+    train_pct = 100 - test_pct - val_pct
+    return train_pct, val_pct, test_pct
 
 
 def _select_architectures():
@@ -287,9 +293,7 @@ def main():
             print("="*60)
             
             # Configure data split percentages
-            test_pct = split_params["test_split"] * 100
-            val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
-            train_pct = 100 - test_pct - val_pct
+            train_pct, val_pct, test_pct = _split_percentages(split_params)
             print(f"\nCurrent split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
             
             configure_split = input("Configure data split? (y/n, default n): ").strip().lower()
@@ -322,21 +326,14 @@ def main():
                         print("Invalid value. Keeping existing validation percentage.")
                 
                 # Display final split
-                test_pct = split_params["test_split"] * 100
-                val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
-                train_pct = 100 - test_pct - val_pct
+                train_pct, val_pct, test_pct = _split_percentages(split_params)
                 print(f"Final split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
             
-            n_str = input(f"\nNumber of points per region (default {DATA_PARAMS['n']}): ").strip()
-            if n_str:
-                try:
-                    n_value = int(n_str)
-                    if n_value > 0:
-                        DATA_PARAMS["n"] = n_value
-                    else:
-                        print("Invalid value. Keeping existing number of points.")
-                except ValueError:
-                    print("Invalid value. Keeping existing number of points.")
+            DATA_PARAMS["n"] = _read_int(
+                f"\nNumber of points per region (default {DATA_PARAMS['n']}): ",
+                default=DATA_PARAMS["n"],
+                min_value=1,
+            )
 
             normalize_str = input("Normalize to zero mean/unit variance? (y/N): ").strip().lower()
             DATA_PARAMS["normalize"] = normalize_str in {"y", "yes"}
@@ -347,7 +344,8 @@ def main():
             if sampling_method == "ALL":
                 # Confirmation of user input choices
                 print("\n--- DATASET GENERATION CONFIRMATION ---")
-                print(f"Split: {100 - split_params['test_split']*100 - split_params['val_split']*(1-split_params['test_split'])*100:.0f}% train / {split_params['val_split']*(1-split_params['test_split'])*100:.0f}% validation / {split_params['test_split']*100:.0f}% test")
+                train_pct, val_pct, test_pct = _split_percentages(split_params)
+                print(f"Split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
                 print(f"Points per region: {DATA_PARAMS['n']}")
                 print(f"Normalization: {'enabled' if DATA_PARAMS.get('normalize', False) else 'disabled'}")
                 print("Generated RND, CTR, and EDGE datasets")
@@ -378,9 +376,7 @@ def main():
             print(f"  Sampling method: {DATA_PARAMS.get('sampling_method', 'ALL')}")
             
             # Display split information
-            test_pct = split_params["test_split"] * 100
-            val_pct = split_params["val_split"] * (1 - split_params["test_split"]) * 100
-            train_pct = 100 - test_pct - val_pct
+            train_pct, val_pct, test_pct = _split_percentages(split_params)
             print(f"  Data split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
             
             # Display dataset sizes
@@ -399,27 +395,9 @@ def main():
             print("\n" + "="*60)
             print("TRAIN ON ALL DATASETS")
             print("="*60)
-            print("Available architectures:")
-            for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items(), 1):
-                print(f"  {i}. {name}: {arch}")
+            architectures_to_train = _select_architectures()
 
-            train_choice = input("\nTrain which architecture(s)? (default 'all', or '1', '1,2,3'): ").strip().lower()
-
-            if train_choice == "all" or train_choice == "":
-                architectures_to_train = list(MLP_ARCHITECTURES.items())
-            else:
-                try:
-                    indices = [int(x.strip()) - 1 for x in train_choice.split(",")]
-                    architectures_to_train = [
-                        (name, arch) for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items())
-                        if i in indices
-                    ]
-                except (ValueError, IndexError):
-                    print("Invalid input. Using all architectures.")
-                    architectures_to_train = list(MLP_ARCHITECTURES.items())
-
-            epochs_str = input("Number of epochs (default 100): ").strip()
-            epochs = int(epochs_str) if epochs_str else 100
+            epochs = _read_int("Number of epochs (default 100): ", default=100, min_value=1)
 
 
             optimizer_type_str = input("Optimizer (1: Adam [default], 2: SGD): ").strip().lower()
@@ -435,8 +413,7 @@ def main():
             else:
                 lr_default = 0.01
 
-            lr_str = input(f"Learning rate (default {lr_default}): ").strip()
-            lr = float(lr_str) if lr_str else lr_default
+            lr = _read_float(f"Learning rate (default {lr_default}): ", default=lr_default, min_value=1e-8)
             print(f"Selected optimizer: {optimizer_type.upper()} | Learning rate: {lr}")
 
             activation_str = input(
@@ -459,8 +436,7 @@ def main():
                 activation = activation_map[activation_str] or "relu"
             print(f"Using activation: {activation}")
 
-            patience_str = input("Early stopping patience (default 3): ").strip()
-            patience = int(patience_str) if patience_str else 3
+            patience = _read_int("Early stopping patience (default 3): ", default=3, min_value=1)
 
             # Train on all datasets
             all_results = {}  # {dataset: {model_name: accuracy}}
@@ -491,7 +467,7 @@ def main():
                     total_params = sum(param.numel() for param in trained_model.parameters())
                     print(f"    Total parameters saved: {total_params}")
                     tn, fp, fn, tp = confusion_counts(trained_model, test_loaders[ds_name])
-                    print("    Confusion (test, best model):")
+                    print("    Confusion (test set):")
                     print(f"      TN: {tn:5d}  FP: {fp:5d}")
                     print(f"      FN: {fn:5d}  TP: {tp:5d}")
                     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
@@ -743,13 +719,7 @@ def main():
                 print("\nNo datasets; recreate datasets first (option 1).")
                 continue
 
-            limit_str = input("Max points to list per category (default 20): ").strip()
-            limit = 20
-            if limit_str:
-                try:
-                    limit = max(1, int(limit_str))
-                except ValueError:
-                    limit = 20
+            limit = _read_int("Max points to list per category (default 20): ", default=20, min_value=1)
 
             fp_fn_by_dataset = {}
 

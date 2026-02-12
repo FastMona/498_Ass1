@@ -1,8 +1,9 @@
 #!/usr/bin/env python
 """Test script for edge-weighted sampling method - compares all three methods."""
 
-from data import generate_intertwined_spirals
 import matplotlib.pyplot as plt
+
+from data import generate_intertwined_spirals
 
 def compare_all_three_methods():
     """Generate and visualize all three sampling methods side by side."""
@@ -24,7 +25,6 @@ def compare_all_three_methods():
         n=n, seed=seed, sampling_method='EDGE', plot=False
     )
     
-    # Extract data for plotting
     def extract_data(data):
         x_c1 = [p[0] for p in data if p[2] == 0]
         y_c1 = [p[1] for p in data if p[2] == 0]
@@ -85,7 +85,11 @@ def compare_all_three_methods():
     print("✓ Three-way comparison plot displayed successfully!")
 
 
-# Run the comparison
-print("Comparing all three sampling methods...")
-print("=" * 60)
-compare_all_three_methods()
+def main():
+    print("Comparing all three sampling methods...")
+    print("=" * 60)
+    compare_all_three_methods()
+
+
+if __name__ == "__main__":
+    main()

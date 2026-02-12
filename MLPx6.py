@@ -12,19 +12,19 @@ import time
 # ============================
 
 MLP_ARCHITECTURES = {
-    "MLP_0": [],                        # No hidden layers (logistic regression)
-    "MLP_1": [16],                  # 16 node hidden layer
-    "MLP_2": [32],                  # 64 node hidden layers
-    "MLP_3": [32, 32],                # 3 hidden layers
-    "MLP_4": [64],                # 4
-    "MLP_5": [64, 64],                # 5
-    "MLP_6": [64, 64, 64],                # 6 (duplicate of MLP_5 for now)
+    "MLP_0": [],                 # No hidden layers (logistic regression)
+    "MLP_1": [16],               # Single hidden layer (16 units)
+    "MLP_2": [32],               # Single hidden layer (32 units)
+    "MLP_3": [32, 32],           # Two hidden layers (32, 32)
+    "MLP_4": [64],               # Single hidden layer (64 units)
+    "MLP_5": [64, 64],           # Two hidden layers (64, 64)
+    "MLP_6": [64, 64, 64],       # Three hidden layers (64, 64, 64)
 }
 
 
 class MLP(nn.Module):
     """
-    Flexible Multi-Layer Perceptron that supports 1-5 hidden layers.
+    Flexible Multi-Layer Perceptron that supports 0-5 hidden layers.
 
     Parameters:
     -----------
@@ -140,9 +140,9 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     model : nn.Module
         The model to train
     train_loader : DataLoader
-        Training data loader (60% of data)
+        Training data loader (~64% of data with default split)
     val_loader : DataLoader
-        Validation data loader (20% of data, used for early stopping)
+        Validation data loader (~16% of data with default split, used for early stopping)
     test_loader : DataLoader
         Testing data loader (20% of data, for final evaluation)
     epochs : int
@@ -185,6 +185,7 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
 
     for epoch in range(epochs):
         # Training phase
+        model.train()
         train_loss = 0.0
         for x_batch, y_batch in train_loader:
             optimizer.zero_grad()
@@ -198,8 +199,9 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         train_losses.append(train_loss)
 
         # Validation phase (for early stopping)
+        model.eval()
         val_loss = 0.0
-        with torch.no_grad():
+        with torch.inference_mode():
             for x_batch, y_batch in val_loader:
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
@@ -219,7 +221,7 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
 
         # Test phase (final evaluation)
         test_loss = 0.0
-        with torch.no_grad():
+        with torch.inference_mode():
             for x_batch, y_batch in test_loader:
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
@@ -258,7 +260,7 @@ def confusion_counts(model, test_loader):
     """Return confusion counts (TN, FP, FN, TP) on the test set."""
     model.eval()
     tn = fp = fn = tp = 0
-    with torch.no_grad():
+    with torch.inference_mode():
         for x_batch, y_batch in test_loader:
             outputs = model(x_batch)
             predicted = (outputs > 0.5).float()
@@ -286,7 +288,7 @@ def predict(model, x, y):
     confidence : float between 0 and 1
     """
     model.eval()
-    with torch.no_grad():
+    with torch.inference_mode():
         input_tensor = torch.tensor([[x, y]], dtype=torch.float32)
         output = model(input_tensor).item()
 
@@ -315,7 +317,7 @@ def evaluate_model(model, test_loader):
     correct = 0
     total = 0
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for x_batch, y_batch in test_loader:
             outputs = model(x_batch)
             predicted = (outputs > 0.5).float()
@@ -327,7 +329,7 @@ def evaluate_model(model, test_loader):
 
 def plot_learning_curves(train_histories, title="Learning Curves", fig=None):
     """
-    Plot learning curves (loss vs epochs) for one or more models.
+    Plot learning curves (train loss vs epochs) for one or more models.
 
     Parameters:
     -----------

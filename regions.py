@@ -1,19 +1,18 @@
-"""Sketch the described regions.
-regions are C1 and C2 with no common points.
-C1 has priority: any shared boundary belongs to C1, and C2 excludes points in C1.
-C1 is defined piecewise by:
-- less than the outer semicircle: x^2 + y^2 <= 4
-- greater than the inner semicircle: x^2 + y^2 >= 1
-- less than the straight line segment: (0,1):(0,2)
-- greater than the straight line segment: (0,-1):(0,0)
-- less than the small semicircle: x^2 + (y+1)^2 <= 1
+"""Define two interlocked annular regions (C1 and C2).
 
-C2 is defined piecewise by:
-- less than the outer semicircle: x^2 + (y+1)^2 <= 4
-- greater than the inner semicircle: x^2 + (y+1)^2 >= 1
-- less than the straight line segment: (0,-1):(0,0)
-- greater than the straight line segment: (0,-2):(0,-3)
-- less than the small semicircle: x^2 + y^2 <= 1
+Regions share boundary curves but do not overlap; boundary points are assigned to C1.
+
+C1 is bounded by:
+- Outer semicircle: x^2 + y^2 = 4 (radius 2, centered at origin)
+- Inner semicircle: x^2 + y^2 = 1 (radius 1, centered at origin)
+- Vertical segments on x = 0 from y in [0, -1] and y in [1, 2]
+- Small semicircle: x^2 + (y + 1)^2 = 1 (radius 1, centered at (0, -1))
+
+C2 mirrors C1 with a vertical shift by -1:
+- Outer semicircle: x^2 + (y + 1)^2 = 4
+- Inner semicircle: x^2 + (y + 1)^2 = 1
+- Vertical segments on x = 0 from y in [-1, 0] and y in [-3, -2]
+- Small semicircle: x^2 + y^2 = 1
 """
 
 from __future__ import annotations
