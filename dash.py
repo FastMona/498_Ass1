@@ -634,7 +634,9 @@ def main():
                         pred, conf = predict(model, x, y)
                         all_conf_values.append(conf)
                         class_name = "C1" if pred == 0 else "C2"
-                        print(f"{model_name:20s} -> {class_name} (confidence: {conf:.4f})")
+                        arch = MLP_ARCHITECTURES.get(model_name, [])
+                        label = f"{model_name} {arch}"
+                        print(f"{label:30s} -> {class_name} (confidence: {conf:.4f})")
                 if all_conf_values:
                     avg_conf = sum(all_conf_values) / len(all_conf_values)
                     sorted_conf = sorted(all_conf_values)
