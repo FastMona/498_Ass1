@@ -22,6 +22,9 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path
 
 
+_BOUNDARY_RADIUS = 1e-6
+
+
 def build_c1_boundary(num_outer: int = 400, num_inner: int = 400, num_circle: int = 300) -> tuple[np.ndarray, np.ndarray]:
 	"""Return a closed boundary for C1 as (x, y) arrays."""
 	outer_theta = np.linspace(np.pi / 2, 3 * np.pi / 2, num_outer)
@@ -60,8 +63,8 @@ def classify_points(points: np.ndarray) -> dict[str, np.ndarray]:
 	"""
 	paths = get_region_paths()
 	# Small positive radius treats boundary points as inside.
-	c1_mask = paths["C1"].contains_points(points, radius=1e-9)
-	c2_mask = paths["C2"].contains_points(points, radius=1e-9)
+	c1_mask = paths["C1"].contains_points(points, radius=_BOUNDARY_RADIUS)
+	c2_mask = paths["C2"].contains_points(points, radius=_BOUNDARY_RADIUS)
 	return {"C1": c1_mask, "C2": np.logical_and(c2_mask, ~c1_mask)}
 
 

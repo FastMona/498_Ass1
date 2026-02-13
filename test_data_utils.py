@@ -1,4 +1,6 @@
 import unittest
+from typing import Sized, cast
+
 import numpy as np
 
 from data import generate_intertwined_spirals, normalize_spirals
@@ -6,6 +8,13 @@ from MLPx6 import prepare_data
 
 
 class TestDataUtilities(unittest.TestCase):
+    @staticmethod
+    def _dataset_size(loader):
+        dataset = loader.dataset
+        if hasattr(dataset, "tensors"):
+            return int(dataset.tensors[0].shape[0])
+        return len(cast(Sized, dataset))
+
     def test_generate_all_returns_three_datasets(self):
         n = 200
         result = generate_intertwined_spirals(n=n, seed=7, plot=False, sampling_method="ALL")
@@ -40,9 +49,9 @@ class TestDataUtilities(unittest.TestCase):
         train_loader, val_loader, test_loader = prepare_data(
             data, test_split=0.2, val_split=0.2, batch_size=16
         )
-        train_count = len(train_loader.dataset)
-        val_count = len(val_loader.dataset)
-        test_count = len(test_loader.dataset)
+        train_count = self._dataset_size(train_loader)
+        val_count = self._dataset_size(val_loader)
+        test_count = self._dataset_size(test_loader)
         self.assertEqual(test_count, 20)
         self.assertEqual(val_count, 16)
         self.assertEqual(train_count, 64)

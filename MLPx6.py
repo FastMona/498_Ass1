@@ -66,9 +66,8 @@ class MLP(nn.Module):
             layers.append(activation_map[activation_name]())
             prev_size = hidden_size
 
-        # Output layer
+        # Output layer (logits for BCEWithLogitsLoss)
         layers.append(nn.Linear(prev_size, output_size))
-        layers.append(nn.Sigmoid())
 
         self.network = nn.Sequential(*layers)
 
@@ -163,7 +162,7 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     train_time_ms : float
         Elapsed time used for training in milliseconds
     """
-    criterion = nn.BCELoss()
+    criterion = nn.BCEWithLogitsLoss()
     if optimizer_type == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr)
     elif optimizer_type == "sgd":
@@ -262,8 +261,9 @@ def confusion_counts(model, test_loader):
     tn = fp = fn = tp = 0
     with torch.inference_mode():
         for x_batch, y_batch in test_loader:
-            outputs = model(x_batch)
-            predicted = (outputs > 0.5).float()
+            logits = model(x_batch)
+            probs = torch.sigmoid(logits)
+            predicted = (probs > 0.5).float()
             tn += ((predicted == 0) & (y_batch == 0)).sum().item()
             fp += ((predicted == 1) & (y_batch == 0)).sum().item()
             fn += ((predicted == 0) & (y_batch == 1)).sum().item()
@@ -290,7 +290,7 @@ def predict(model, x, y):
     model.eval()
     with torch.inference_mode():
         input_tensor = torch.tensor([[x, y]], dtype=torch.float32)
-        output = model(input_tensor).item()
+        output = torch.sigmoid(model(input_tensor)).item()
 
     prediction = 1 if output > 0.5 else 0
     confidence = output if prediction == 1 else (1 - output)
@@ -319,8 +319,9 @@ def evaluate_model(model, test_loader):
 
     with torch.inference_mode():
         for x_batch, y_batch in test_loader:
-            outputs = model(x_batch)
-            predicted = (outputs > 0.5).float()
+            logits = model(x_batch)
+            probs = torch.sigmoid(logits)
+            predicted = (probs > 0.5).float()
             total += y_batch.size(0)
             correct += (predicted == y_batch).sum().item()
 

@@ -63,9 +63,14 @@ def _init_dataloaders(dataset_storage, batch_size=32, test_split=0.2, val_split=
     train_histories = {}
 
     for ds_name in dataset_storage.keys():
-        train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name] = prepare_data(
-            dataset_storage[ds_name], test_split=test_split, val_split=val_split, batch_size=batch_size
-        )
+        if not dataset_storage[ds_name]:
+            train_loaders[ds_name] = None
+            val_loaders[ds_name] = None
+            test_loaders[ds_name] = None
+        else:
+            train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name] = prepare_data(
+                dataset_storage[ds_name], test_split=test_split, val_split=val_split, batch_size=batch_size
+            )
         trained_models[ds_name] = {}
         train_histories[ds_name] = {}
 
@@ -332,7 +337,7 @@ def main():
             DATA_PARAMS["n"] = _read_int(
                 f"\nNumber of points per region (default {DATA_PARAMS['n']}): ",
                 default=DATA_PARAMS["n"],
-                min_value=1,
+                min_value=0,
             )
 
             normalize_str = input("Normalize to zero mean/unit variance? (y/N): ").strip().lower()
@@ -440,7 +445,14 @@ def main():
 
             # Train on all datasets
             all_results = {}  # {dataset: {model_name: accuracy}}
+            trainable_datasets = []
             for ds_name in dataset_storage.keys():
+                if not train_loaders.get(ds_name):
+                    print(f"\n{'='*60}")
+                    print(f"Skipping {ds_name} dataset (0 samples)")
+                    print(f"{'='*60}")
+                    continue
+                trainable_datasets.append(ds_name)
                 print(f"\n{'='*60}")
                 print(f"Training on {ds_name} dataset")
                 print(f"{'='*60}")
@@ -487,26 +499,29 @@ def main():
             # Display summary comparison
             points_per_cat = DATA_PARAMS.get("n", "?")
             total_points = 2 * points_per_cat if isinstance(points_per_cat, int) else "?"
-            print("\n" + "="*60)
-            print(f"TRAINING SUMMARY - TOTAL POINTS: {total_points}, {activation.upper()} ACTIVATION")
-            print("="*60)
+            if trainable_datasets:
+                print("\n" + "="*60)
+                print(f"TRAINING SUMMARY - TOTAL POINTS: {total_points}, {activation.upper()} ACTIVATION")
+                print("="*60)
 
-            arch_col_width = 24
-            acc_col_width = 10
+                arch_col_width = 24
+                acc_col_width = 10
 
-            header_parts = [f"{'Architecture':{arch_col_width}s}"]
-            for ds_name in dataset_storage.keys():
-                header_parts.append(f"{ds_name} %".center(acc_col_width))
-            header_line = " | ".join(header_parts)
-            print(header_line)
-            print("-" * len(header_line))
+                header_parts = [f"{'Architecture':{arch_col_width}s}"]
+                for ds_name in trainable_datasets:
+                    header_parts.append(f"{ds_name} %".center(acc_col_width))
+                header_line = " | ".join(header_parts)
+                print(header_line)
+                print("-" * len(header_line))
 
-            for arch_name, hidden_layers in architectures_to_train:
-                row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
-                for ds_name in dataset_storage.keys():
-                    acc = all_results[ds_name][arch_name]
-                    row_parts.append(f"{acc * 100:9.2f}%")
-                print(" | ".join(row_parts))
+                for arch_name, hidden_layers in architectures_to_train:
+                    row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
+                    for ds_name in trainable_datasets:
+                        acc = all_results[ds_name][arch_name]
+                        row_parts.append(f"{acc * 100:9.2f}%")
+                    print(" | ".join(row_parts))
+            else:
+                print("\nNo datasets have samples. Training skipped.")
 
             ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in train_histories]
             if ordered_datasets:

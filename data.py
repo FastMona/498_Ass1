@@ -5,6 +5,9 @@ from matplotlib.path import Path
 from regions import classify_points, get_region_paths, build_c1_boundary
 
 
+_BOUNDARY_RADIUS = 1e-6
+
+
 # ============================
 # Region Definitions
 # ============================
@@ -16,7 +19,7 @@ _C2_PATH = _REGION_PATHS["C2"]
 
 def _mask_from_path(path: Path, x, y, include_boundary: bool = True):
     points = np.column_stack([np.ravel(x), np.ravel(y)])
-    radius = 1e-9 if include_boundary else 0.0
+    radius = _BOUNDARY_RADIUS if include_boundary else 0.0
     mask = path.contains_points(points, radius=radius)
     return mask.reshape(np.shape(x))
 
@@ -50,16 +53,18 @@ def _plot_interlocked_region_boundaries(ax, norm_stats=None):
     c2_x, c2_y = -c1_x, -c1_y - 1.0
 
     c2_points = np.column_stack([c2_x, c2_y])
-    c2_keep = ~_C1_PATH.contains_points(c2_points, radius=1e-9)
+    c2_keep = ~_C1_PATH.contains_points(c2_points, radius=_BOUNDARY_RADIUS)
+    shared_arc = (np.abs(c2_x ** 2 + (c2_y + 1.0) ** 2 - 1.0) <= 1e-3) & (c2_x >= 0.0)
+    c2_keep &= ~shared_arc
     c1_x, c1_y = _apply_normalization(c1_x, c1_y, norm_stats)
     c2_x, c2_y = _apply_normalization(c2_x, c2_y, norm_stats)
 
-    ax.fill(c1_x, c1_y, color="#CCE5FF", alpha=0.7, zorder=0)
-    ax.fill(c2_x, c2_y, color="#FFE5CC", alpha=0.7, zorder=0)
-    ax.plot(c1_x, c1_y, color="tab:blue", lw=2.5, zorder=1)
+    ax.fill(c1_x, c1_y, color="#CCE5FF", alpha=0.7, zorder=0, edgecolor="none")
+    ax.fill(c2_x, c2_y, color="#FFE5CC", alpha=0.7, zorder=0, edgecolor="none")
     c2_x = np.where(c2_keep, c2_x, np.nan)
     c2_y = np.where(c2_keep, c2_y, np.nan)
     ax.plot(c2_x, c2_y, color="tab:orange", lw=2.5, zorder=1)
+    ax.plot(c1_x, c1_y, color="tab:blue", lw=2.5, zorder=2)
 
     seg_y = np.array([-3.0, -2.0])
     seg_x = np.zeros_like(seg_y)
@@ -230,6 +235,8 @@ def generate_intertwined_spirals(
         return min_x, max_x, min_y, max_y
 
     def _sample_region(region: str, sampler, n_samples: int, max_batches: int = 200) -> np.ndarray:
+        if n_samples <= 0:
+            return np.empty((0, 2))
         points: list[np.ndarray] = []
         for _ in range(max_batches):
             batch = max(256, n_samples)
@@ -438,8 +445,11 @@ def plot_three_datasets(dataset_storage, data_params, norm_stats_by_dataset=None
     rnd_data = dataset_storage.get("RND")
     ctr_data = dataset_storage.get("CTR")
     edge_data = dataset_storage.get("EDGE")
-    if not (rnd_data and ctr_data and edge_data):
+    if rnd_data is None or ctr_data is None or edge_data is None:
         return False
+    rnd_data = rnd_data or []
+    ctr_data = ctr_data or []
+    edge_data = edge_data or []
     _plot_three_sampling_methods(
         rnd_data,
         ctr_data,
