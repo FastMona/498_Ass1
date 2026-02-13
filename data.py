@@ -121,7 +121,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     )
     ax2.set_xlabel('$x_1$')
     ax2.set_ylabel('$x_2$')
-    ax2.set_title(f'CTR (Center-Weighted Sampling at region centroids) - {ctr_count} points')
+    ax2.set_title(f'CTR (Center-Weighted Sampling)) - {ctr_count} points')
     ax2.set_aspect('equal', 'box')
     ax2.grid(True, alpha=0.3)
     ax2.legend()

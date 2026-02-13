@@ -1,5 +1,16 @@
 # Classification of Non-Linearly Separable Regions Using Multi-Layer Perceptrons
 
+## Environment Setup
+
+This project uses a local `.venv` environment.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+pip install -e .
+```
+
 ## Executive Summary
 
 This project investigates the classification of two interlocked, non-linearly separable regions (C1 and C2) using Multi-Layer Perceptron (MLP) neural networks. The regions form a complex geometric pattern resembling interlocked annuli that cannot be separated by a single linear boundary, making them unsuitable for single-layer perceptrons.

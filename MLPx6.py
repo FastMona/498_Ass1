@@ -12,14 +12,26 @@ import time
 # ============================
 
 MLP_ARCHITECTURES = {
-    "MLP_0": [],                 # No hidden layers (logistic regression)
-    "MLP_1": [16],               # Single hidden layer (16 units)
-    "MLP_2": [16, 16],           # Two hidden layers (16, 16)
-    "MLP_3": [16, 16, 16],       # Three hidden layers (16, 16, 16)
-    "MLP_4": [64],               # Single hidden layer (64 units)
-    "MLP_5": [64, 64],           # Two hidden layers (64, 64)
-    "MLP_6": [64, 64, 64],       # Three hidden layers (64, 64, 64)
+    "MLP_0": [],                            # No hidden layers (logistic regression)
+    "MLP_1": [8],                         # Single hidden layer (16 units)
+    "MLP_2": [16, 16],                      # Two hidden layers (16, 16)
+    "MLP_3": [8, 8, 8],                  # Three hidden layers (16, 16, 16)
+    "MLP_4": [8, 8, 8, 8],              # Four hidden layers (16, 16, 16, 16)
+    "MLP_5": [8, 8, 8, 8, 8],          # Five hidden layers (16, 16, 16, 16, 16)         
+    "MLP_6": [8, 8, 16, 8, 8],          # Six hidden layers (16, 16, 32, 16, 16)
 }
+
+
+def get_best_device():
+    """Return the torch device used by this project."""
+    return torch.device("cpu")
+
+
+def _model_device(model):
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        return torch.device("cpu")
 
 
 class MLP(nn.Module):
@@ -123,9 +135,10 @@ def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
     val_dataset = TensorDataset(x_tensor[val_indices], y_tensor[val_indices])
     test_dataset = TensorDataset(x_tensor[test_indices], y_tensor[test_indices])
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    use_pin_memory = False
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=use_pin_memory)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=use_pin_memory)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, pin_memory=use_pin_memory)
 
     return train_loader, val_loader, test_loader
 
@@ -162,6 +175,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
     train_time_ms : float
         Elapsed time used for training in milliseconds
     """
+    device = get_best_device()
+    model = model.to(device)
     criterion = nn.BCEWithLogitsLoss()
     if optimizer_type == "adam":
         optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -187,6 +202,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         model.train()
         train_loss = 0.0
         for x_batch, y_batch in train_loader:
+            x_batch = x_batch.to(device, non_blocking=True)
+            y_batch = y_batch.to(device, non_blocking=True)
             optimizer.zero_grad()
             outputs = model(x_batch)
             loss = criterion(outputs, y_batch)
@@ -202,6 +219,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         val_loss = 0.0
         with torch.inference_mode():
             for x_batch, y_batch in val_loader:
+                x_batch = x_batch.to(device, non_blocking=True)
+                y_batch = y_batch.to(device, non_blocking=True)
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
                 val_loss += loss.item()
@@ -212,7 +231,7 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         # Early stopping check based on validation loss
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_model_state = {k: v.detach().clone() for k, v in model.state_dict().items()}
+            best_model_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
             best_epoch = epoch
             patience_counter = 0
         else:
@@ -222,6 +241,8 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
         test_loss = 0.0
         with torch.inference_mode():
             for x_batch, y_batch in test_loader:
+                x_batch = x_batch.to(device, non_blocking=True)
+                y_batch = y_batch.to(device, non_blocking=True)
                 outputs = model(x_batch)
                 loss = criterion(outputs, y_batch)
                 test_loss += loss.item()
@@ -258,9 +279,12 @@ def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.0
 def confusion_counts(model, test_loader):
     """Return confusion counts (TN, FP, FN, TP) on the test set."""
     model.eval()
+    device = _model_device(model)
     tn = fp = fn = tp = 0
     with torch.inference_mode():
         for x_batch, y_batch in test_loader:
+            x_batch = x_batch.to(device, non_blocking=True)
+            y_batch = y_batch.to(device, non_blocking=True)
             logits = model(x_batch)
             probs = torch.sigmoid(logits)
             predicted = (probs > 0.5).float()
@@ -288,8 +312,9 @@ def predict(model, x, y):
     confidence : float between 0 and 1
     """
     model.eval()
+    device = _model_device(model)
     with torch.inference_mode():
-        input_tensor = torch.tensor([[x, y]], dtype=torch.float32)
+        input_tensor = torch.tensor([[x, y]], dtype=torch.float32, device=device)
         output = torch.sigmoid(model(input_tensor)).item()
 
     prediction = 1 if output > 0.5 else 0
@@ -314,11 +339,14 @@ def evaluate_model(model, test_loader):
     accuracy : float between 0 and 1
     """
     model.eval()
+    device = _model_device(model)
     correct = 0
     total = 0
 
     with torch.inference_mode():
         for x_batch, y_batch in test_loader:
+            x_batch = x_batch.to(device, non_blocking=True)
+            y_batch = y_batch.to(device, non_blocking=True)
             logits = model(x_batch)
             probs = torch.sigmoid(logits)
             predicted = (probs > 0.5).float()
@@ -369,6 +397,7 @@ def plot_learning_curves(train_histories, title="Learning Curves", fig=None):
 __all__ = [
     "MLP_ARCHITECTURES",
     "MLP",
+    "get_best_device",
     "prepare_data",
     "train_model",
     "predict",

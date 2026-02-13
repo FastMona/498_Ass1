@@ -1,6 +1,8 @@
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
+import json
+import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -14,12 +16,16 @@ from data import (
 from MLPx6 import (
     MLP,
     MLP_ARCHITECTURES,
+    get_best_device,
     prepare_data,
     train_model,
     evaluate_model,
     predict,
     confusion_counts,
 )
+
+
+DATA_CACHE_PATH = Path("saved_datasets.json")
 
 
 def _generate_datasets(data_params, active_dataset):
@@ -180,6 +186,28 @@ def _select_architectures():
         return list(MLP_ARCHITECTURES.items())
 
 
+def _select_datasets(dataset_storage, prompt_text="Select dataset(s) [RND, CTR, EDGE] (default ALL): "):
+    available = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage]
+    if not available:
+        return []
+
+    selection = input(prompt_text).strip().upper()
+    if not selection or selection == "ALL":
+        return available
+
+    chosen = [part.strip() for part in selection.split(",") if part.strip()]
+    valid = [name for name in chosen if name in available]
+    if not valid:
+        print("Invalid dataset selection. Using ALL.")
+        return available
+
+    deduped = []
+    for name in valid:
+        if name not in deduped:
+            deduped.append(name)
+    return deduped
+
+
 def _print_training_time_summary(train_histories, dataset_storage, points_per_cat):
     ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage]
     if not ordered_datasets or not any(train_histories.get(ds) for ds in ordered_datasets):
@@ -255,6 +283,91 @@ def _print_training_time_summary(train_histories, dataset_storage, points_per_ca
     print("\nTraining time summary saved to test_results.txt")
 
 
+def _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_stats_by_dataset, data_params):
+    payload = {
+        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "dataset_storage": {
+            ds_name: [[float(x), float(y), int(label)] for x, y, label in ds_data]
+            for ds_name, ds_data in dataset_storage.items()
+        },
+        "active_dataset": active_dataset,
+        "sampling_method": sampling_method,
+        "norm_stats_by_dataset": {
+            ds_name: {
+                "mean": np.asarray(stats.get("mean", [0.0, 0.0]), dtype=float).tolist(),
+                "std": np.asarray(stats.get("std", [1.0, 1.0]), dtype=float).tolist(),
+            }
+            for ds_name, stats in (norm_stats_by_dataset or {}).items()
+        },
+        "data_params": {
+            key: data_params.get(key)
+            for key in ("n", "noise_std", "seed", "normalize", "sampling_method")
+        },
+    }
+    try:
+        DATA_CACHE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _load_dataset_cache():
+    if not DATA_CACHE_PATH.exists():
+        return None
+    try:
+        payload = json.loads(DATA_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    raw_storage = payload.get("dataset_storage", {})
+    dataset_storage = {}
+    for ds_name, ds_data in raw_storage.items():
+        dataset_storage[ds_name] = [
+            (float(point[0]), float(point[1]), int(point[2]))
+            for point in ds_data
+            if isinstance(point, (list, tuple)) and len(point) == 3
+        ]
+
+    if not dataset_storage:
+        return None
+
+    active_dataset = payload.get("active_dataset", "RND")
+    if active_dataset not in dataset_storage:
+        active_dataset = next(iter(dataset_storage.keys()))
+
+    sampling_method = payload.get("sampling_method", "ALL")
+
+    norm_stats_by_dataset = {}
+    for ds_name, stats in payload.get("norm_stats_by_dataset", {}).items():
+        if not isinstance(stats, dict):
+            continue
+        mean = np.asarray(stats.get("mean", [0.0, 0.0]), dtype=float).tolist()
+        std = np.asarray(stats.get("std", [1.0, 1.0]), dtype=float).tolist()
+        norm_stats_by_dataset[ds_name] = {"mean": mean, "std": std}
+
+    data_params = payload.get("data_params", {}) if isinstance(payload.get("data_params", {}), dict) else {}
+    saved_at = payload.get("saved_at")
+
+    return {
+        "dataset_storage": dataset_storage,
+        "active_dataset": active_dataset,
+        "sampling_method": sampling_method,
+        "norm_stats_by_dataset": norm_stats_by_dataset,
+        "data_params": data_params,
+        "saved_at": saved_at,
+    }
+
+
+def _delete_dataset_cache():
+    if not DATA_CACHE_PATH.exists():
+        return False
+    try:
+        DATA_CACHE_PATH.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def main():
     print("="*60)
     print("INTERTWINED SPIRALS CLASSIFICATION WITH MLPs")
@@ -276,8 +389,25 @@ def main():
         "val_split": 0.2    # 20% of remaining (16% overall)
     }
 
+    loaded_cache = _load_dataset_cache()
+    if loaded_cache is not None:
+        dataset_storage = loaded_cache["dataset_storage"]
+        active_dataset = loaded_cache["active_dataset"]
+        sampling_method = loaded_cache["sampling_method"]
+        norm_stats_by_dataset = loaded_cache["norm_stats_by_dataset"]
+        for key in ("n", "noise_std", "seed", "normalize", "sampling_method"):
+            if key in loaded_cache["data_params"]:
+                DATA_PARAMS[key] = loaded_cache["data_params"][key]
+        spirals = dataset_storage.get(active_dataset, [])
+        saved_at = loaded_cache.get("saved_at")
+        if saved_at:
+            print(f"\nLoaded persisted datasets from saved_datasets.json (saved at {saved_at}).")
+        else:
+            print("\nLoaded persisted datasets from saved_datasets.json.")
+    else:
+        print("\nNo datasets loaded. Use option 1 to generate datasets.")
+
     active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed", "normalize")}
-    print("\nNo datasets loaded. Use option 1 to generate datasets.")
     print(f"Data parameters (active): {active_params}")
     print(f"Sampling method: {sampling_method}")
     
@@ -367,6 +497,14 @@ def main():
             dataset_storage, active_dataset, spirals, sampling_method, norm_stats_by_dataset = _generate_datasets(
                 DATA_PARAMS, active_dataset
             )
+            if _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_stats_by_dataset, DATA_PARAMS):
+                print(
+                    "Datasets saved to saved_datasets.json "
+                    f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+                    "(overwrites previous saved datasets)."
+                )
+            else:
+                print("Warning: could not save datasets to disk.")
             last_mc_summary_rows = None
             last_mc_meta = None
             if sampling_method == "ALL":
@@ -426,6 +564,9 @@ def main():
             print("\n" + "="*60)
             print("TRAIN ON ALL DATASETS")
             print("="*60)
+            print(f"Python: {sys.executable}")
+            print(f"Torch: {torch.__version__}")
+            print(f"Device: {get_best_device()}")
             architectures_to_train = _select_architectures()
 
             epochs = _read_int("Number of epochs (default 100): ", default=100, min_value=1)
@@ -644,22 +785,34 @@ def main():
             print("\n" + "="*60)
             print("MONTE CARLO TRAINING (REPEATED RUNS)")
             print("="*60)
+            print(f"Python: {sys.executable}")
+            print(f"Torch: {torch.__version__}")
+            print(f"Device: {get_best_device()}")
             n_runs = _read_int("Number of Monte Carlo runs (default 20): ", default=20, min_value=2)
             base_seed = _read_int("Base random seed (default 42): ", default=42, min_value=0)
 
-            architectures_to_train = last_train_config["architectures_to_train"]
+            print("\nSelect architectures for Monte Carlo runs:")
+            architectures_to_train = _select_architectures()
+            if not architectures_to_train:
+                print("No architectures selected. Using option-3 architecture selection.")
+                architectures_to_train = last_train_config["architectures_to_train"]
             epochs = last_train_config["epochs"]
             optimizer_type = last_train_config["optimizer_type"]
             lr = last_train_config["lr"]
             activation = last_train_config["activation"]
             patience = last_train_config["patience"]
 
-            ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage and dataset_storage[name]]
+            ordered_datasets = _select_datasets(
+                dataset_storage,
+                prompt_text="Dataset(s) for Monte Carlo [RND, CTR, EDGE] (default ALL): ",
+            )
+            ordered_datasets = [name for name in ordered_datasets if dataset_storage.get(name)]
             if not ordered_datasets:
                 print("No non-empty datasets found. Generate datasets first (option 1).")
                 continue
 
             print(f"Using option-3 config -> activation: {activation}, optimizer: {optimizer_type}, lr: {lr}, epochs: {epochs}, patience: {patience}")
+            print(f"Datasets: {', '.join(ordered_datasets)}")
             print(f"Running {n_runs} Monte Carlo runs starting at seed {base_seed}...")
 
             mc_results = {
@@ -984,7 +1137,13 @@ def main():
 
         elif choice == "7":
             points_per_cat = DATA_PARAMS.get("n", "?")
-            ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage]
+            ordered_datasets = _select_datasets(
+                dataset_storage,
+                prompt_text="Dataset(s) for summary [RND, CTR, EDGE] (default ALL): ",
+            )
+            if not ordered_datasets:
+                print("No datasets available. Create datasets first (option 1).")
+                continue
             model_names = [
                 name for name in MLP_ARCHITECTURES.keys()
                 if any(name in train_histories.get(ds, {}) for ds in ordered_datasets)
@@ -1157,6 +1316,8 @@ def main():
                 last_mc_summary_rows = None
                 last_mc_meta = None
                 plt.close("all")
+                if _delete_dataset_cache():
+                    print("Persisted datasets removed (saved_datasets.json).")
                 print("Datasets cleared.")
                 print("Test data cleared.")
             if clear_train:

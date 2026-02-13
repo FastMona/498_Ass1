@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "498-ass1"
+version = "0.1.0"
+description = "Classification of non-linearly separable regions using MLPs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "torch>=1.9.0",
+  "torchvision>=0.10.0",
+  "numpy",
+  "pillow",
+]
+
+[tool.setuptools]
+py-modules = ["dash", "data", "MLPx6", "regions", "spirals_mlp"]
