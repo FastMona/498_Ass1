@@ -14,8 +14,8 @@ import time
 MLP_ARCHITECTURES = {
     "MLP_0": [],                 # No hidden layers (logistic regression)
     "MLP_1": [16],               # Single hidden layer (16 units)
-    "MLP_2": [32],               # Single hidden layer (32 units)
-    "MLP_3": [32, 32],           # Two hidden layers (32, 32)
+    "MLP_2": [16, 16],           # Two hidden layers (16, 16)
+    "MLP_3": [16, 16, 16],       # Three hidden layers (16, 16, 16)
     "MLP_4": [64],               # Single hidden layer (64 units)
     "MLP_5": [64, 64],           # Two hidden layers (64, 64)
     "MLP_6": [64, 64, 64],       # Three hidden layers (64, 64, 64)
@@ -36,9 +36,9 @@ class MLP(nn.Module):
     output_size : int
         Output dimension (default 1 for binary classification)
     activation : str
-        Hidden-layer activation: "relu", "tanh", or "leaky_relu" (default "relu")
+        Hidden-layer activation: "relu", "tanh", or "leaky_relu" (default "leaky_relu")
     """
-    def __init__(self, hidden_layers, input_size=2, output_size=1, activation="relu"):
+    def __init__(self, hidden_layers, input_size=2, output_size=1, activation="leaky_relu"):
         super(MLP, self).__init__()
 
         # Validate hidden layers
@@ -130,7 +130,7 @@ def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
     return train_loader, val_loader, test_loader
 
 
-def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, patience=3, verbose=True, optimizer_type="adam"):
+def train_model(model, train_loader, val_loader, test_loader, epochs=100, lr=0.001, patience=5, verbose=True, optimizer_type="adam"):
     """
     Train an MLP model with validation set for early stopping.
 

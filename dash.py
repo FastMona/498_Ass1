@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import torch
+import numpy as np
 from pathlib import Path
 from datetime import datetime
 
@@ -141,6 +142,24 @@ def _split_percentages(split_params):
     return train_pct, val_pct, test_pct
 
 
+def _compute_prsf1(tn, fp, fn, tp):
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    return precision, recall, specificity, f1
+
+
+def _mean_std_ci(values):
+    if not values:
+        return 0.0, 0.0, 0.0
+    arr = np.asarray(values, dtype=np.float64)
+    mean = float(np.mean(arr))
+    std = float(np.std(arr, ddof=1)) if arr.size > 1 else 0.0
+    ci95 = 1.96 * std / np.sqrt(arr.size) if arr.size > 1 else 0.0
+    return mean, std, float(ci95)
+
+
 def _select_architectures():
     print("Available architectures:")
     for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items(), 1):
@@ -247,6 +266,9 @@ def main():
     spirals = []
     sampling_method = DATA_PARAMS.get("sampling_method", "ALL")
     norm_stats_by_dataset = {}
+    last_train_config = None
+    last_mc_summary_rows = None
+    last_mc_meta = None
 
     # Data split parameters - defaults: 64% train / 16% val / 20% test
     split_params = {
@@ -278,13 +300,12 @@ def main():
         print("="*60)
         print("1. Create Datasets")
         print("2. Display Current Dataset")
-        if len(dataset_storage) > 1:
-            print("3. Train on ALL Datasets")
+        print("3. Train on ALL Datasets")
         print("4. Single Point Test (classify one point)")
-        if len(dataset_storage) > 1:
-            print("5. Cross-Dataset Comparison")
+        print("5. Cross-Dataset Comparison")
         print("6. List/Display FP/FN Points (best models)")
         print("7. Training Summary")
+        print("8. Monte Carlo Training (repeat option 3 config)")
         print("9. Cleanup")
         print("0. Exit")
         print("="*60)
@@ -346,6 +367,8 @@ def main():
             dataset_storage, active_dataset, spirals, sampling_method, norm_stats_by_dataset = _generate_datasets(
                 DATA_PARAMS, active_dataset
             )
+            last_mc_summary_rows = None
+            last_mc_meta = None
             if sampling_method == "ALL":
                 # Confirmation of user input choices
                 print("\n--- DATASET GENERATION CONFIRMATION ---")
@@ -396,7 +419,10 @@ def main():
             
             if not plot_three_datasets(dataset_storage, DATA_PARAMS, norm_stats_by_dataset=norm_stats_by_dataset):
                 print("Missing datasets; recreate datasets first (option 1).")
-        elif choice == "3" and len(dataset_storage) > 1:
+        elif choice == "3":
+            if len(dataset_storage) <= 1:
+                print("\nCreate datasets first (option 1) before training all datasets.")
+                continue
             print("\n" + "="*60)
             print("TRAIN ON ALL DATASETS")
             print("="*60)
@@ -422,11 +448,11 @@ def main():
             print(f"Selected optimizer: {optimizer_type.upper()} | Learning rate: {lr}")
 
             activation_str = input(
-                "Hidden activation (1: relu, 2: leaky_relu, 3: tanh; default 1): "
+                "Hidden activation (1: leaky_relu [default], 2: relu, 3: tanh): "
             ).strip().lower()
             activation_map = {
-                "1": "relu",
-                "2": "leaky_relu",
+                "1": "leaky_relu",
+                "2": "relu",
                 "3": "tanh",
                 "relu": "relu",
                 "leaky_relu": "leaky_relu",
@@ -435,13 +461,21 @@ def main():
                 "": "",
             }
             if activation_str not in activation_map:
-                print("Invalid activation. Using relu.")
-                activation = "relu"
+                print("Invalid activation. Using leaky_relu.")
+                activation = "leaky_relu"
             else:
-                activation = activation_map[activation_str] or "relu"
+                activation = activation_map[activation_str] or "leaky_relu"
             print(f"Using activation: {activation}")
 
-            patience = _read_int("Early stopping patience (default 3): ", default=3, min_value=1)
+            patience = _read_int("Early stopping patience (default 5): ", default=5, min_value=1)
+            last_train_config = {
+                "architectures_to_train": architectures_to_train,
+                "epochs": epochs,
+                "optimizer_type": optimizer_type,
+                "lr": lr,
+                "activation": activation,
+                "patience": patience,
+            }
 
             # Train on all datasets
             all_results = {}  # {dataset: {model_name: accuracy}}
@@ -596,6 +630,171 @@ def main():
 
             print("\nResults saved to test_results.txt")
 
+        elif choice == "8":
+            if len(dataset_storage) <= 1:
+                print("\nCreate datasets first (option 1) before running Monte Carlo training.")
+                continue
+            if not dataset_storage:
+                print("\nNo datasets; recreate datasets first (option 1).")
+                continue
+            if last_train_config is None:
+                print("\nRun option 3 first to set the training configuration.")
+                continue
+
+            print("\n" + "="*60)
+            print("MONTE CARLO TRAINING (REPEATED RUNS)")
+            print("="*60)
+            n_runs = _read_int("Number of Monte Carlo runs (default 20): ", default=20, min_value=2)
+            base_seed = _read_int("Base random seed (default 42): ", default=42, min_value=0)
+
+            architectures_to_train = last_train_config["architectures_to_train"]
+            epochs = last_train_config["epochs"]
+            optimizer_type = last_train_config["optimizer_type"]
+            lr = last_train_config["lr"]
+            activation = last_train_config["activation"]
+            patience = last_train_config["patience"]
+
+            ordered_datasets = [name for name in ("RND", "CTR", "EDGE") if name in dataset_storage and dataset_storage[name]]
+            if not ordered_datasets:
+                print("No non-empty datasets found. Generate datasets first (option 1).")
+                continue
+
+            print(f"Using option-3 config -> activation: {activation}, optimizer: {optimizer_type}, lr: {lr}, epochs: {epochs}, patience: {patience}")
+            print(f"Running {n_runs} Monte Carlo runs starting at seed {base_seed}...")
+
+            mc_results = {
+                ds_name: {
+                    arch_name: {
+                        "accuracy": [],
+                        "precision": [],
+                        "recall": [],
+                        "specificity": [],
+                        "f1": [],
+                        "train_time_s": [],
+                    }
+                    for arch_name, _ in architectures_to_train
+                }
+                for ds_name in ordered_datasets
+            }
+
+            for run_idx in range(n_runs):
+                run_seed = base_seed + run_idx
+                print(f"\nRun {run_idx + 1}/{n_runs} (seed={run_seed})")
+
+                np.random.seed(run_seed)
+                torch.manual_seed(run_seed)
+
+                for ds_name in ordered_datasets:
+                    run_train_loader, run_val_loader, run_test_loader = prepare_data(
+                        dataset_storage[ds_name],
+                        test_split=split_params["test_split"],
+                        val_split=split_params["val_split"],
+                        batch_size=32,
+                    )
+
+                    for arch_name, hidden_layers in architectures_to_train:
+                        model = MLP(hidden_layers, activation=activation)
+                        trained_model, _, _, _, train_time_ms = train_model(
+                            model,
+                            run_train_loader,
+                            run_val_loader,
+                            run_test_loader,
+                            epochs=epochs,
+                            lr=lr,
+                            patience=patience,
+                            verbose=False,
+                            optimizer_type=optimizer_type,
+                        )
+
+                        tn, fp, fn, tp = confusion_counts(trained_model, run_test_loader)
+                        precision, recall, specificity, f1 = _compute_prsf1(tn, fp, fn, tp)
+                        acc = evaluate_model(trained_model, run_test_loader)
+
+                        metrics = mc_results[ds_name][arch_name]
+                        metrics["accuracy"].append(acc)
+                        metrics["precision"].append(precision)
+                        metrics["recall"].append(recall)
+                        metrics["specificity"].append(specificity)
+                        metrics["f1"].append(f1)
+                        metrics["train_time_s"].append(train_time_ms / 1000.0)
+
+            print("\n" + "="*60)
+            print("MONTE CARLO SUMMARY (MEAN ± STD, 95% CI OF MEAN)")
+            print("="*60)
+            print(f"{'Dataset':7s} | {'Architecture':20s} | {'Acc%':>16s} | {'P':>16s} | {'R':>16s} | {'S':>16s} | {'F1':>16s} | {'Time(s)':>16s}")
+            print("-" * 154)
+
+            summary_rows = []
+            for ds_name in ordered_datasets:
+                for arch_name, hidden_layers in architectures_to_train:
+                    m = mc_results[ds_name][arch_name]
+                    acc_mean, acc_std, acc_ci = _mean_std_ci(m["accuracy"])
+                    p_mean, p_std, p_ci = _mean_std_ci(m["precision"])
+                    r_mean, r_std, r_ci = _mean_std_ci(m["recall"])
+                    s_mean, s_std, s_ci = _mean_std_ci(m["specificity"])
+                    f1_mean, f1_std, f1_ci = _mean_std_ci(m["f1"])
+                    t_mean, t_std, t_ci = _mean_std_ci(m["train_time_s"])
+
+                    arch_label = str(hidden_layers)
+                    if len(arch_label) > 20:
+                        arch_label = arch_label[:17] + "..."
+
+                    print(
+                        f"{ds_name:7s} | {arch_label:20s} | "
+                        f"{acc_mean*100:6.2f}±{acc_std*100:5.2f} | "
+                        f"{p_mean:6.3f}±{p_std:5.3f} | "
+                        f"{r_mean:6.3f}±{r_std:5.3f} | "
+                        f"{s_mean:6.3f}±{s_std:5.3f} | "
+                        f"{f1_mean:6.3f}±{f1_std:5.3f} | "
+                        f"{t_mean:6.2f}±{t_std:5.2f}"
+                    )
+
+                    summary_rows.append({
+                        "dataset": ds_name,
+                        "architecture": str(hidden_layers),
+                        "acc": (acc_mean, acc_std, acc_ci),
+                        "p": (p_mean, p_std, p_ci),
+                        "r": (r_mean, r_std, r_ci),
+                        "s": (s_mean, s_std, s_ci),
+                        "f1": (f1_mean, f1_std, f1_ci),
+                        "time": (t_mean, t_std, t_ci),
+                    })
+
+            with open('test_results.txt', 'a') as f:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"\n{'='*80}\n")
+                f.write(f"MONTE CARLO SUMMARY - {timestamp}\n")
+                f.write(f"Runs: {n_runs}, Base seed: {base_seed}\n")
+                f.write(
+                    f"Config: activation={activation}, optimizer={optimizer_type}, lr={lr}, "
+                    f"epochs={epochs}, patience={patience}\n"
+                )
+                f.write(f"Split: test={split_params['test_split']:.2f}, val={split_params['val_split']:.2f} of trainval\n")
+                f.write(f"{'='*80}\n")
+                for row in summary_rows:
+                    f.write(
+                        f"{row['dataset']} {row['architecture']} | "
+                        f"Acc={row['acc'][0]*100:.2f}±{row['acc'][1]*100:.2f} (95%CI ±{row['acc'][2]*100:.2f}) | "
+                        f"P={row['p'][0]:.3f}±{row['p'][1]:.3f} (95%CI ±{row['p'][2]:.3f}) | "
+                        f"R={row['r'][0]:.3f}±{row['r'][1]:.3f} (95%CI ±{row['r'][2]:.3f}) | "
+                        f"S={row['s'][0]:.3f}±{row['s'][1]:.3f} (95%CI ±{row['s'][2]:.3f}) | "
+                        f"F1={row['f1'][0]:.3f}±{row['f1'][1]:.3f} (95%CI ±{row['f1'][2]:.3f}) | "
+                        f"Time={row['time'][0]:.2f}±{row['time'][1]:.2f}s (95%CI ±{row['time'][2]:.2f}s)\n"
+                    )
+
+            last_mc_summary_rows = summary_rows
+            last_mc_meta = {
+                "n_runs": n_runs,
+                "base_seed": base_seed,
+                "activation": activation,
+                "optimizer_type": optimizer_type,
+                "lr": lr,
+                "epochs": epochs,
+                "patience": patience,
+            }
+
+            print("\nMonte Carlo summary saved to test_results.txt")
+
         elif choice == "4":
             if not any(any(models.values()) for models in trained_models.values()):
                 print("\nNo trained models yet. Please train models first (option 3).")
@@ -647,7 +846,10 @@ def main():
             print("\nExiting. Goodbye!")
             break
 
-        elif choice == "5" and len(dataset_storage) > 1:
+        elif choice == "5":
+            if len(dataset_storage) <= 1:
+                print("\nCreate datasets first (option 1) before cross-dataset comparison.")
+                continue
             if not any(any(models.values()) for models in trained_models.values()):
                 print("\nNo trained models yet. Please train models first (option 3).")
                 continue
@@ -893,6 +1095,47 @@ def main():
                 for line in prsf1_table_lines:
                     f.write(line + "\n")
 
+                if last_mc_summary_rows and last_mc_meta:
+                    print("\n" + "="*60)
+                    print("MONTE CARLO SNAPSHOT (FROM OPTION 8)")
+                    print("="*60)
+                    print(
+                        f"Runs: {last_mc_meta['n_runs']}, Base seed: {last_mc_meta['base_seed']}, "
+                        f"Act: {last_mc_meta['activation']}, Opt: {last_mc_meta['optimizer_type']}, "
+                        f"LR: {last_mc_meta['lr']}, Epochs: {last_mc_meta['epochs']}, Patience: {last_mc_meta['patience']}"
+                    )
+                    print(f"{'Dataset':7s} | {'Architecture':20s} | {'Acc%':>16s} | {'F1':>16s} | {'Time(s)':>16s}")
+                    print("-" * 92)
+                    for row in last_mc_summary_rows:
+                        arch_label = row["architecture"]
+                        if len(arch_label) > 20:
+                            arch_label = arch_label[:17] + "..."
+                        print(
+                            f"{row['dataset']:7s} | {arch_label:20s} | "
+                            f"{row['acc'][0]*100:6.2f}±{row['acc'][1]*100:5.2f} | "
+                            f"{row['f1'][0]:6.3f}±{row['f1'][1]:5.3f} | "
+                            f"{row['time'][0]:6.2f}±{row['time'][1]:5.2f}"
+                        )
+
+                    f.write("\nMONTE CARLO SNAPSHOT (FROM OPTION 8)\n")
+                    f.write(
+                        f"Runs: {last_mc_meta['n_runs']}, Base seed: {last_mc_meta['base_seed']}, "
+                        f"Act: {last_mc_meta['activation']}, Opt: {last_mc_meta['optimizer_type']}, "
+                        f"LR: {last_mc_meta['lr']}, Epochs: {last_mc_meta['epochs']}, Patience: {last_mc_meta['patience']}\n"
+                    )
+                    f.write(f"{'Dataset':7s} | {'Architecture':20s} | {'Acc%':>16s} | {'F1':>16s} | {'Time(s)':>16s}\n")
+                    f.write("-" * 92 + "\n")
+                    for row in last_mc_summary_rows:
+                        arch_label = row["architecture"]
+                        if len(arch_label) > 20:
+                            arch_label = arch_label[:17] + "..."
+                        f.write(
+                            f"{row['dataset']:7s} | {arch_label:20s} | "
+                            f"{row['acc'][0]*100:6.2f}±{row['acc'][1]*100:5.2f} | "
+                            f"{row['f1'][0]:6.3f}±{row['f1'][1]:5.3f} | "
+                            f"{row['time'][0]:6.2f}±{row['time'][1]:5.2f}\n"
+                        )
+
         elif choice == "9":
             print("\n" + "="*60)
             print("CLEANUP")
@@ -910,12 +1153,18 @@ def main():
                 test_loaders = {}
                 trained_models = {}
                 train_histories = {}
+                last_train_config = None
+                last_mc_summary_rows = None
+                last_mc_meta = None
                 plt.close("all")
                 print("Datasets cleared.")
                 print("Test data cleared.")
             if clear_train:
                 trained_models = {ds: {} for ds in trained_models.keys()}
                 train_histories = {ds: {} for ds in train_histories.keys()}
+                last_train_config = None
+                last_mc_summary_rows = None
+                last_mc_meta = None
                 print("Training data cleared.")
 
             results_path = Path("test_results.txt")
@@ -929,7 +1178,13 @@ def main():
                         keep_lines = 1
                 keep_lines = max(1, min(100, keep_lines))
 
-                lines = results_path.read_text(encoding="utf-8").splitlines()
+                try:
+                    lines = results_path.read_text(encoding="utf-8").splitlines()
+                except UnicodeDecodeError:
+                    try:
+                        lines = results_path.read_text(encoding="cp1252").splitlines()
+                    except UnicodeDecodeError:
+                        lines = results_path.read_text(encoding="utf-8", errors="replace").splitlines()
                 remaining = lines[-keep_lines:] if lines else []
                 results_path.write_text("\n".join(remaining) + ("\n" if remaining else ""), encoding="utf-8")
                 print(f"test_results.txt trimmed to last {keep_lines} lines.")
