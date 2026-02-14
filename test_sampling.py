@@ -1,13 +1,13 @@
 #!/usr/bin/env python
 """Test script for all three sampling methods (RND, CTR, and EDGE)."""
 
-from data import generate_intertwined_spirals
+from data import generate_interlocked_region_data
 
 
 def main():
     # Test with ALL sampling methods - should show side-by-side plots with all three
     print("Testing ALL sampling methods (RND, CTR, and EDGE)...")
-    result = generate_intertwined_spirals(
+    result = generate_interlocked_region_data(
         n=500,
         seed=7,
         plot=True,

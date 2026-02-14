@@ -13,14 +13,13 @@ import time
 
 MLP_ARCHITECTURES = {
     "MLP_0": [],                            # No hidden layers (logistic regression)
-    "MLP_1": [8],                         # Single hidden layer (16 units)
-    "MLP_2": [16, 16],                      # Two hidden layers (16, 16)
-    "MLP_3": [8, 8, 8],                  # Three hidden layers (16, 16, 16)
-    "MLP_4": [8, 8, 8, 8],              # Four hidden layers (16, 16, 16, 16)
-    "MLP_5": [8, 8, 8, 8, 8],          # Five hidden layers (16, 16, 16, 16, 16)         
-    "MLP_6": [8, 8, 16, 8, 8],          # Six hidden layers (16, 16, 32, 16, 16)
+    "MLP_1": [8 ,8],                         # Single hidden layer (16 units)
+    "MLP_2": [64, 64, 64],                      # Two hidden layers (16, 16)
+    "MLP_3": [128, 128],                  # Three hidden layers (16, 16, 16)
+    "MLP_4": [128, 128, 128],              # Four hidden layers (16, 16, 16, 16)
+    "MLP_5": [256, 256],          # Five hidden layers (16, 16, 16, 16, 16)         
+    "MLP_6": [256, 256, 256],          # Six hidden layers (16, 16, 32, 16, 16)
 }
-
 
 def get_best_device():
     """Return the torch device used by this project."""
@@ -87,14 +86,14 @@ class MLP(nn.Module):
         return self.network(x)
 
 
-def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
+def prepare_data(data_points, test_split=0.2, val_split=0.2, batch_size=32):
     """
     Prepare data for training with 3-way split: train/validation/test.
 
     Parameters:
     -----------
-    spirals_data : list of tuples
-        Output from generate_intertwined_spirals()
+    data_points : list of tuples
+        Output from region data generation
     test_split : float
         Fraction of data for testing (default 0.2, i.e., 20%)
     val_split : float
@@ -108,15 +107,15 @@ def prepare_data(spirals_data, test_split=0.2, val_split=0.2, batch_size=32):
     train_loader, val_loader, test_loader : DataLoader objects
     """
     # Extract x, y, and labels
-    x_data = np.array([[x, y] for x, y, _ in spirals_data], dtype=np.float32)
-    y_data = np.array([label for _, _, label in spirals_data], dtype=np.float32).reshape(-1, 1)
+    x_data = np.array([[x, y] for x, y, _ in data_points], dtype=np.float32)
+    y_data = np.array([label for _, _, label in data_points], dtype=np.float32).reshape(-1, 1)
 
     # Convert to tensors
     x_tensor = torch.from_numpy(x_data)
     y_tensor = torch.from_numpy(y_data)
 
     # Split into train+val and test
-    n_samples = len(spirals_data)
+    n_samples = len(data_points)
     n_test = int(n_samples * test_split)
     n_trainval = n_samples - n_test
 

@@ -8,8 +8,8 @@ from datetime import datetime
 
 from data import (
     DATA_PARAMS,
-    generate_intertwined_spirals,
-    normalize_spirals,
+    generate_interlocked_region_data,
+    normalize_region_data,
     plot_three_datasets,
     plot_three_datasets_with_fp_fn,
 )
@@ -34,7 +34,7 @@ def _generate_datasets(data_params, active_dataset):
     norm_stats_by_dataset = {}
 
     if sampling_method == "ALL":
-        result = generate_intertwined_spirals(
+        result = generate_interlocked_region_data(
             n=data_params["n"],
             noise_std=data_params["noise_std"],
             seed=data_params["seed"],
@@ -46,20 +46,20 @@ def _generate_datasets(data_params, active_dataset):
         dataset_storage["EDGE"] = result[2]
         if active_dataset not in dataset_storage:
             active_dataset = "RND"
-        spirals = dataset_storage[active_dataset]
+        data_points = dataset_storage[active_dataset]
     else:
-        spirals = generate_intertwined_spirals(**data_params)
-        dataset_storage[sampling_method] = spirals
+        data_points = generate_interlocked_region_data(**data_params)
+        dataset_storage[sampling_method] = data_points
         active_dataset = sampling_method
 
     if data_params.get("normalize", False):
         for ds_name, ds_data in list(dataset_storage.items()):
-            normalized_data, stats = normalize_spirals(ds_data)
+            normalized_data, stats = normalize_region_data(ds_data)
             dataset_storage[ds_name] = normalized_data
             norm_stats_by_dataset[ds_name] = stats
-        spirals = dataset_storage[active_dataset]
+        data_points = dataset_storage[active_dataset]
 
-    return dataset_storage, active_dataset, spirals, sampling_method, norm_stats_by_dataset
+    return dataset_storage, active_dataset, data_points, sampling_method, norm_stats_by_dataset
 
 
 def _init_dataloaders(dataset_storage, batch_size=32, test_split=0.2, val_split=0.2):
@@ -370,13 +370,13 @@ def _delete_dataset_cache():
 
 def main():
     print("="*60)
-    print("INTERTWINED SPIRALS CLASSIFICATION WITH MLPs")
+    print("INTERLOCKED REGION CLASSIFICATION WITH MLPs")
     print("="*60)
 
     # Start with empty datasets; user generates via option 1.
     active_dataset = "RND"
     dataset_storage = {}
-    spirals = []
+    data_points = []
     sampling_method = DATA_PARAMS.get("sampling_method", "ALL")
     norm_stats_by_dataset = {}
     last_train_config = None
@@ -398,7 +398,7 @@ def main():
         for key in ("n", "noise_std", "seed", "normalize", "sampling_method"):
             if key in loaded_cache["data_params"]:
                 DATA_PARAMS[key] = loaded_cache["data_params"][key]
-        spirals = dataset_storage.get(active_dataset, [])
+        data_points = dataset_storage.get(active_dataset, [])
         saved_at = loaded_cache.get("saved_at")
         if saved_at:
             print(f"\nLoaded persisted datasets from saved_datasets.json (saved at {saved_at}).")
@@ -494,7 +494,7 @@ def main():
             normalize_str = input("Normalize to zero mean/unit variance? (y/N): ").strip().lower()
             DATA_PARAMS["normalize"] = normalize_str in {"y", "yes"}
 
-            dataset_storage, active_dataset, spirals, sampling_method, norm_stats_by_dataset = _generate_datasets(
+            dataset_storage, active_dataset, data_points, sampling_method, norm_stats_by_dataset = _generate_datasets(
                 DATA_PARAMS, active_dataset
             )
             if _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_stats_by_dataset, DATA_PARAMS):
@@ -518,9 +518,9 @@ def main():
             if DATA_PARAMS.get("normalize", False):
                 print("Normalization: enabled (zero mean/unit variance)")
 
-            total_points = len(spirals)
-            points_per_spiral = DATA_PARAMS["n"]
-            print(f"Total points: {total_points} ({points_per_spiral} per spiral)")
+            total_points = len(data_points)
+            points_per_region = DATA_PARAMS["n"]
+            print(f"Total points: {total_points} ({points_per_region} per region)")
 
             train_loaders, val_loaders, test_loaders, trained_models, train_histories = _init_dataloaders(
                 dataset_storage, batch_size=32, test_split=split_params["test_split"], val_split=split_params["val_split"]
@@ -1306,7 +1306,7 @@ def main():
             if clear_test:
                 dataset_storage = {}
                 active_dataset = "RND"
-                spirals = []
+                data_points = []
                 train_loaders = {}
                 val_loaders = {}
                 test_loaders = {}

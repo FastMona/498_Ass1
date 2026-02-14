@@ -17,25 +17,6 @@ _C1_PATH = _REGION_PATHS["C1"]
 _C2_PATH = _REGION_PATHS["C2"]
 
 
-def _mask_from_path(path: Path, x, y, include_boundary: bool = True):
-    points = np.column_stack([np.ravel(x), np.ravel(y)])
-    radius = _BOUNDARY_RADIUS if include_boundary else 0.0
-    mask = path.contains_points(points, radius=radius)
-    return mask.reshape(np.shape(x))
-
-
-def _c1_predicate(x, y):
-    """C1: Region from regions.py."""
-    return _mask_from_path(_C1_PATH, x, y, include_boundary=True)
-
-
-def _c2_predicate(x, y):
-    """C2: Region from regions.py."""
-    c2_mask = _mask_from_path(_C2_PATH, x, y, include_boundary=True)
-    c1_mask = _mask_from_path(_C1_PATH, x, y, include_boundary=True)
-    return c2_mask & ~c1_mask
-
-
 # ============================
 # Data Generation Helpers
 # ============================
@@ -203,7 +184,7 @@ def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset, norm_stats
 # Data Generation Function
 # ============================
 
-def generate_intertwined_spirals(
+def generate_interlocked_region_data(
     n=600,
     noise_std=0.0,
     seed=None,
@@ -390,25 +371,25 @@ DATA_PARAMS = {
 }
 
 
-def normalize_spirals(spirals):
-    """Normalize spiral coordinates to zero mean and unit variance."""
-    if not spirals:
-        return spirals, {"mean": np.zeros(2), "std": np.ones(2)}
+def normalize_region_data(data_points):
+    """Normalize region-sample coordinates to zero mean and unit variance."""
+    if not data_points:
+        return data_points, {"mean": np.zeros(2), "std": np.ones(2)}
 
-    x_data = np.array([[x, y] for x, y, _ in spirals], dtype=float)
+    x_data = np.array([[x, y] for x, y, _ in data_points], dtype=float)
     mean = x_data.mean(axis=0)
     std = x_data.std(axis=0)
     std = np.where(std == 0.0, 1.0, std)
 
     normalized = [
         ((x - mean[0]) / std[0], (y - mean[1]) / std[1], label)
-        for x, y, label in spirals
+        for x, y, label in data_points
     ]
 
     return normalized, {"mean": mean, "std": std}
 
 
-def plot_dataset(spirals, data_params, active_dataset, plot_fig=None, norm_stats=None):
+def plot_dataset(data_points, data_params, active_dataset, plot_fig=None, norm_stats=None):
     """Plot a single dataset with boundaries and return the figure handle."""
     if plot_fig is None or not plt.fignum_exists(plot_fig.number):
         plot_fig = plt.figure(figsize=(8, 8))
@@ -416,9 +397,9 @@ def plot_dataset(spirals, data_params, active_dataset, plot_fig=None, norm_stats
         plot_fig.clf()
         plt.figure(plot_fig.number)
 
-    x_data = np.array([[x, y] for x, y, _ in spirals])
-    c1_mask = np.array([label == 0 for _, _, label in spirals])
-    c2_mask = np.array([label == 1 for _, _, label in spirals])
+    x_data = np.array([[x, y] for x, y, _ in data_points])
+    c1_mask = np.array([label == 0 for _, _, label in data_points])
+    c2_mask = np.array([label == 1 for _, _, label in data_points])
 
     plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
     plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
@@ -461,11 +442,9 @@ def plot_three_datasets(dataset_storage, data_params, norm_stats_by_dataset=None
 
 __all__ = [
     "DATA_PARAMS",
-    "generate_intertwined_spirals",
-    "normalize_spirals",
+    "generate_interlocked_region_data",
+    "normalize_region_data",
     "plot_dataset",
     "plot_three_datasets",
     "plot_three_datasets_with_fp_fn",
-    "_c1_predicate",
-    "_c2_predicate",
 ]

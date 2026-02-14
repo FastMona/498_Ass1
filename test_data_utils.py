@@ -3,7 +3,7 @@ from typing import Sized, cast
 
 import numpy as np
 
-from data import generate_intertwined_spirals, normalize_spirals
+from data import generate_interlocked_region_data, normalize_region_data
 from MLPx6 import prepare_data
 
 
@@ -17,7 +17,7 @@ class TestDataUtilities(unittest.TestCase):
 
     def test_generate_all_returns_three_datasets(self):
         n = 200
-        result = generate_intertwined_spirals(n=n, seed=7, plot=False, sampling_method="ALL")
+        result = generate_interlocked_region_data(n=n, seed=7, plot=False, sampling_method="ALL")
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 3)
         rnd_data, ctr_data, edge_data = result
@@ -27,14 +27,14 @@ class TestDataUtilities(unittest.TestCase):
 
     def test_generate_single_dataset_labels(self):
         n = 150
-        data = generate_intertwined_spirals(n=n, seed=7, plot=False, sampling_method="RND")
+        data = generate_interlocked_region_data(n=n, seed=7, plot=False, sampling_method="RND")
         labels = {label for _, _, label in data}
         self.assertEqual(len(data), 2 * n)
         self.assertEqual(labels, {0, 1})
 
-    def test_normalize_spirals_stats(self):
-        data = generate_intertwined_spirals(n=200, seed=7, plot=False, sampling_method="RND")
-        normalized, stats = normalize_spirals(data)
+    def test_normalize_region_data_stats(self):
+        data = generate_interlocked_region_data(n=200, seed=7, plot=False, sampling_method="RND")
+        normalized, stats = normalize_region_data(data)
         self.assertEqual(len(normalized), len(data))
         mean = np.array(stats["mean"], dtype=float)
         std = np.array(stats["std"], dtype=float)

@@ -68,31 +68,6 @@ def classify_points(points: np.ndarray) -> dict[str, np.ndarray]:
 	return {"C1": c1_mask, "C2": np.logical_and(c2_mask, ~c1_mask)}
 
 
-def sample_points_in_region(region: str, count: int, rng: np.random.Generator | None = None) -> np.ndarray:
-	"""Sample points uniformly from a region using rejection sampling."""
-	paths = get_region_paths()
-	if region not in paths:
-		raise ValueError(f"Unknown region: {region}")
-	path = paths[region]
-	vertices = path.vertices
-	min_x, min_y = vertices.min(axis=0)
-	max_x, max_y = vertices.max(axis=0)
-
-	if rng is None:
-		rng = np.random.default_rng()
-
-	points: list[np.ndarray] = []
-	while sum(len(p) for p in points) < count:
-		batch = max(256, count)
-		x = rng.uniform(min_x, max_x, batch)
-		y = rng.uniform(min_y, max_y, batch)
-		candidates = np.column_stack([x, y])
-		mask = path.contains_points(candidates)
-		points.append(candidates[mask])
-
-	return np.vstack(points)[:count]
-
-
 def plot_regions() -> None:
 	fig, ax = plt.subplots(figsize=(6, 6))
 

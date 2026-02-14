@@ -219,7 +219,6 @@ The project includes comprehensive visualization capabilities:
 ├── data.py              # Data generation and sampling methods
 ├── regions.py           # Geometric region definitions
 ├── MLPx6.py             # MLP architectures and training utilities
-├── spirals_mlp.py       # Compatibility wrapper
 ├── test_results.txt     # Saved experimental results
 └── README.md            # This report
 ```
@@ -289,7 +288,7 @@ Potential extensions of this work:
 ### Running the Dashboard
 
 ```powershell
-python spirals_mlp.py
+python dash.py
 ```
 
 ### Main Menu Options

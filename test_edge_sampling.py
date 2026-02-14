@@ -3,7 +3,7 @@
 
 import matplotlib.pyplot as plt
 
-from data import generate_intertwined_spirals
+from data import generate_interlocked_region_data
 
 def compare_all_three_methods():
     """Generate and visualize all three sampling methods side by side."""
@@ -13,15 +13,15 @@ def compare_all_three_methods():
     print("Generating data with three sampling methods...")
     
     # Generate data for each method
-    rnd_data = generate_intertwined_spirals(
+    rnd_data = generate_interlocked_region_data(
         n=n, seed=seed, sampling_method='RND', plot=False
     )
     
-    ctr_data = generate_intertwined_spirals(
+    ctr_data = generate_interlocked_region_data(
         n=n, seed=seed, sampling_method='CTR', plot=False
     )
     
-    edge_data = generate_intertwined_spirals(
+    edge_data = generate_interlocked_region_data(
         n=n, seed=seed, sampling_method='EDGE', plot=False
     )
     
