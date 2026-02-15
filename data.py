@@ -421,6 +421,16 @@ def plot_dataset(data_points, data_params, active_dataset, plot_fig=None, norm_s
     return plot_fig
 
 
+def generate_intertwined_spirals(*args, **kwargs):
+    """Backward-compatible alias for generate_interlocked_region_data()."""
+    return generate_interlocked_region_data(*args, **kwargs)
+
+
+def normalize_spirals(*args, **kwargs):
+    """Backward-compatible alias for normalize_region_data()."""
+    return normalize_region_data(*args, **kwargs)
+
+
 def plot_three_datasets(dataset_storage, data_params, norm_stats_by_dataset=None):
     """Plot RND, CTR, and EDGE datasets side-by-side in one window."""
     rnd_data = dataset_storage.get("RND")
@@ -444,6 +454,8 @@ __all__ = [
     "DATA_PARAMS",
     "generate_interlocked_region_data",
     "normalize_region_data",
+    "generate_intertwined_spirals",
+    "normalize_spirals",
     "plot_dataset",
     "plot_three_datasets",
     "plot_three_datasets_with_fp_fn",

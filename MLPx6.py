@@ -12,13 +12,13 @@ import time
 # ============================
 
 MLP_ARCHITECTURES = {
-    "MLP_0": [],                            # No hidden layers (logistic regression)
-    "MLP_1": [8 ,8],                         # Single hidden layer (16 units)
-    "MLP_2": [64, 64, 64],                      # Two hidden layers (16, 16)
-    "MLP_3": [128, 128],                  # Three hidden layers (16, 16, 16)
-    "MLP_4": [128, 128, 128],              # Four hidden layers (16, 16, 16, 16)
-    "MLP_5": [256, 256],          # Five hidden layers (16, 16, 16, 16, 16)         
-    "MLP_6": [256, 256, 256],          # Six hidden layers (16, 16, 32, 16, 16)
+    "MLP_0": [],                            
+    "MLP_1": [5 ,5],                        
+    "MLP_2": [8, 8],                      
+    "MLP_3": [16, 16],                  
+    "MLP_4": [32, 32],              
+    "MLP_5": [64, 64],                   
+    "MLP_6": [128, 128],         
 }
 
 def get_best_device():
