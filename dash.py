@@ -1209,6 +1209,31 @@ def main():
                 print(line)
                 cpu_time_table_lines.append(line)
 
+            # 2b. Parameter Count Table
+            print("\n" + "="*60)
+            print("PARAMETER COUNT SUMMARY - CURRENT ARCHITECTURES")
+            print("="*60)
+            param_col_width = 12
+            param_header = f"{'Architecture':{arch_col_width}s} | {'# Params':>{param_col_width}s}"
+            print(param_header)
+            print("-" * len(param_header))
+            param_table_lines = [param_header, "-" * len(param_header)]
+            for model_name in model_names:
+                arch = MLP_ARCHITECTURES.get(model_name, [])
+                model_for_params = None
+                for ds_name in ordered_datasets:
+                    candidate = trained_models.get(ds_name, {}).get(model_name)
+                    if candidate is not None:
+                        model_for_params = candidate
+                        break
+                if model_for_params is None:
+                    param_text = "N/A"
+                else:
+                    param_text = f"{sum(param.numel() for param in model_for_params.parameters()):,}"
+                line = f"{str(arch):{arch_col_width}s} | {param_text:>{param_col_width}s}"
+                print(line)
+                param_table_lines.append(line)
+
             # 3. P/R/S/F1 Table
             print("\n" + "="*60)
             print(f"PRECISION / RECALL / SPECIFICITY / F1 SUMMARY - {points_per_cat} POINTS PER CAT")
@@ -1249,6 +1274,9 @@ def main():
                     f.write(line + "\n")
                 f.write("\nCPU TIME TABLE\n")
                 for line in cpu_time_table_lines:
+                    f.write(line + "\n")
+                f.write("\nPARAMETER COUNT TABLE\n")
+                for line in param_table_lines:
                     f.write(line + "\n")
                 f.write("\nP/R/S/F1 TABLE\n")
                 for line in prsf1_table_lines:
