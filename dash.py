@@ -18,14 +18,93 @@ from MLPx6 import (
     MLP_ARCHITECTURES,
     get_best_device,
     prepare_data,
-    train_model,
-    evaluate_model,
-    predict,
-    confusion_counts,
+    train_model as train_mlp_model,
+    evaluate_model as evaluate_mlp_model,
+    predict as predict_mlp,
+    confusion_counts as confusion_counts_mlp,
+)
+from CPNx6 import (
+    CPN,
+    CPN_ARCHITECTURES,
+    CPN_PARAMS,
+    train_model as train_cpn_model,
+    evaluate_model as evaluate_cpn_model,
+    predict as predict_cpn,
+    confusion_counts as confusion_counts_cpn,
 )
 
 
 DATA_CACHE_PATH = Path("saved_datasets.json")
+TRAINING_CACHE_PATH = Path("saved_trainingsets.json")
+
+ALL_ARCHITECTURES = {
+    **MLP_ARCHITECTURES,
+    **CPN_ARCHITECTURES,
+}
+
+
+def _is_cpn_architecture(model_name):
+    return model_name in CPN_ARCHITECTURES
+
+
+def _format_architecture(model_name):
+    if _is_cpn_architecture(model_name):
+        arch = CPN_ARCHITECTURES.get(model_name, {})
+        return f"K={arch.get('n_kohonen', '?')}, mode={arch.get('input_mode', CPN_PARAMS.get('input_mode', 'augmented_unit_sphere'))}"
+    return str(MLP_ARCHITECTURES.get(model_name, []))
+
+
+def _build_model(model_name, arch_config, activation):
+    if _is_cpn_architecture(model_name):
+        return CPN(
+            n_kohonen=int(arch_config.get("n_kohonen", 100)),
+            input_size=int(CPN_PARAMS.get("input_size", 2)),
+            output_size=int(CPN_PARAMS.get("output_size", 1)),
+            input_mode=str(arch_config.get("input_mode", CPN_PARAMS.get("input_mode", "augmented_unit_sphere"))),
+        )
+    return MLP(arch_config, activation=activation)
+
+
+def _train_any_model(model_name, model, train_loader, val_loader, test_loader, epochs, lr, patience, verbose, optimizer_type):
+    if _is_cpn_architecture(model_name):
+        return train_cpn_model(
+            model,
+            train_loader,
+            val_loader,
+            test_loader,
+            epochs=epochs,
+            patience=patience,
+            verbose=verbose,
+        )
+    return train_mlp_model(
+        model,
+        train_loader,
+        val_loader,
+        test_loader,
+        epochs=epochs,
+        lr=lr,
+        patience=patience,
+        verbose=verbose,
+        optimizer_type=optimizer_type,
+    )
+
+
+def _evaluate_any_model(model_name, model, test_loader):
+    if _is_cpn_architecture(model_name):
+        return evaluate_cpn_model(model, test_loader)
+    return evaluate_mlp_model(model, test_loader)
+
+
+def _predict_any_model(model_name, model, x, y):
+    if _is_cpn_architecture(model_name):
+        return predict_cpn(model, x, y)
+    return predict_mlp(model, x, y)
+
+
+def _confusion_any_model(model_name, model, test_loader):
+    if _is_cpn_architecture(model_name):
+        return confusion_counts_cpn(model, test_loader)
+    return confusion_counts_mlp(model, test_loader)
 
 
 def _generate_datasets(data_params, active_dataset):
@@ -84,14 +163,18 @@ def _init_dataloaders(dataset_storage, batch_size=32, test_split=0.2, val_split=
     return train_loaders, val_loaders, test_loaders, trained_models, train_histories
 
 
-def _collect_fp_fn_points(model, test_loader):
+def _collect_fp_fn_points(model_name, model, test_loader):
     model.eval()
     fp_points = []
     fn_points = []
     with torch.no_grad():
         for x_batch, y_batch in test_loader:
             outputs = model(x_batch)
-            predicted = (outputs > 0.5).float()
+            if _is_cpn_architecture(model_name):
+                probs = outputs
+            else:
+                probs = torch.sigmoid(outputs)
+            predicted = (probs > 0.5).float()
             fp_mask = (predicted == 1) & (y_batch == 0)
             fn_mask = (predicted == 0) & (y_batch == 1)
 
@@ -168,22 +251,25 @@ def _mean_std_ci(values):
 
 def _select_architectures():
     print("Available architectures:")
-    for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items(), 1):
-        print(f"  {i}. {name}: {arch}")
+    for i, (name, arch) in enumerate(ALL_ARCHITECTURES.items(), 1):
+        if _is_cpn_architecture(name):
+            print(f"  {i}. {name}: K={arch.get('n_kohonen')}, mode={arch.get('input_mode', CPN_PARAMS.get('input_mode', 'augmented_unit_sphere'))}")
+        else:
+            print(f"  {i}. {name}: {arch}")
 
     train_choice = input("\nSelect architectures (default 'all', or '1', '1,2,3'): ").strip().lower()
     if train_choice == "all" or train_choice == "":
-        return list(MLP_ARCHITECTURES.items())
+        return list(ALL_ARCHITECTURES.items())
 
     try:
         indices = [int(x.strip()) - 1 for x in train_choice.split(",")]
         return [
-            (name, arch) for i, (name, arch) in enumerate(MLP_ARCHITECTURES.items())
+            (name, arch) for i, (name, arch) in enumerate(ALL_ARCHITECTURES.items())
             if i in indices
         ]
     except (ValueError, IndexError):
         print("Invalid input. Using all architectures.")
-        return list(MLP_ARCHITECTURES.items())
+        return list(ALL_ARCHITECTURES.items())
 
 
 def _select_datasets(dataset_storage, prompt_text="Select dataset(s) [RND, CTR, EDGE] (default ALL): "):
@@ -219,7 +305,7 @@ def _print_training_time_summary(train_histories, dataset_storage, points_per_ca
     print("="*60)
 
     model_names = [
-        name for name in MLP_ARCHITECTURES.keys()
+        name for name in ALL_ARCHITECTURES.keys()
         if any(name in train_histories.get(ds, {}) for ds in ordered_datasets)
     ]
     if not model_names:
@@ -237,7 +323,7 @@ def _print_training_time_summary(train_histories, dataset_storage, points_per_ca
     print("-" * len(header_line))
 
     for model_name in model_names:
-        arch = MLP_ARCHITECTURES.get(model_name, [])
+        arch = _format_architecture(model_name)
         label = f"{model_name} {arch}"
         if len(label) > model_col_width:
             label = label[:model_col_width - 3] + "..."
@@ -263,7 +349,7 @@ def _print_training_time_summary(train_histories, dataset_storage, points_per_ca
         f.write(header_line + "\n")
         f.write("-" * len(header_line) + "\n")
         for model_name in model_names:
-            arch = MLP_ARCHITECTURES.get(model_name, [])
+            arch = _format_architecture(model_name)
             label = f"{model_name} {arch}"
             if len(label) > model_col_width:
                 label = label[:model_col_width - 3] + "..."
@@ -306,6 +392,47 @@ def _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_s
     }
     try:
         DATA_CACHE_PATH.write_text(json.dumps(payload), encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
+def _serialize_model_state(model):
+    state_dict = model.state_dict()
+    serialized = {}
+    for key, value in state_dict.items():
+        if isinstance(value, torch.Tensor):
+            serialized[key] = value.detach().cpu().numpy().tolist()
+        else:
+            serialized[key] = np.asarray(value).tolist()
+    return serialized
+
+
+def _save_training_cache(trained_models, train_histories):
+    payload = {
+        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "trained_models": {},
+    }
+
+    for ds_name, models in trained_models.items():
+        if not models:
+            continue
+        payload["trained_models"][ds_name] = {}
+
+        for model_name, model in models.items():
+            history = train_histories.get(ds_name, {}).get(model_name, {})
+            payload["trained_models"][ds_name][model_name] = {
+                "model_type": "CPN" if _is_cpn_architecture(model_name) else "MLP",
+                "architecture": _format_architecture(model_name),
+                "state_dict": _serialize_model_state(model),
+                "metrics": {
+                    "accuracy": float(history["accuracy"]) if history.get("accuracy") is not None else None,
+                    "train_time_s": float(history["train_time_s"]) if history.get("train_time_s") is not None else None,
+                },
+            }
+
+    try:
+        TRAINING_CACHE_PATH.write_text(json.dumps(payload), encoding="utf-8")
         return True
     except OSError:
         return False
@@ -368,9 +495,19 @@ def _delete_dataset_cache():
         return False
 
 
+def _delete_training_cache():
+    if not TRAINING_CACHE_PATH.exists():
+        return False
+    try:
+        TRAINING_CACHE_PATH.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def main():
     print("="*60)
-    print("INTERLOCKED REGION CLASSIFICATION WITH MLPs")
+    print("INTERLOCKED REGION CLASSIFICATION WITH MLPs + CPNs")
     print("="*60)
 
     # Start with empty datasets; user generates via option 1.
@@ -633,12 +770,20 @@ def main():
                 print(f"{'='*60}")
                 all_results[ds_name] = {}
 
-                for arch_name, hidden_layers in architectures_to_train:
-                    print(f"\n  Training {hidden_layers}...")
-                    model = MLP(hidden_layers, activation=activation)
-                    trained_model, train_losses, val_losses, test_losses, train_time_ms = train_model(
-                        model, train_loaders[ds_name], val_loaders[ds_name], test_loaders[ds_name],
-                        epochs=epochs, lr=lr, patience=patience, verbose=True, optimizer_type=optimizer_type
+                for arch_name, arch_config in architectures_to_train:
+                    print(f"\n  Training {arch_name}: {_format_architecture(arch_name)}...")
+                    model = _build_model(arch_name, arch_config, activation)
+                    trained_model, train_losses, val_losses, test_losses, train_time_ms = _train_any_model(
+                        arch_name,
+                        model,
+                        train_loaders[ds_name],
+                        val_loaders[ds_name],
+                        test_loaders[ds_name],
+                        epochs=epochs,
+                        lr=lr,
+                        patience=patience,
+                        verbose=True,
+                        optimizer_type=optimizer_type,
                     )
                     train_time_s = train_time_ms / 1000.0
 
@@ -653,7 +798,7 @@ def main():
 
                     total_params = sum(param.numel() for param in trained_model.parameters())
                     print(f"    Total parameters saved: {total_params}")
-                    tn, fp, fn, tp = confusion_counts(trained_model, test_loaders[ds_name])
+                    tn, fp, fn, tp = _confusion_any_model(arch_name, trained_model, test_loaders[ds_name])
                     print("    Confusion (test set):")
                     print(f"      TN: {tn:5d}  FP: {fp:5d}")
                     print(f"      FN: {fn:5d}  TP: {tp:5d}")
@@ -665,7 +810,7 @@ def main():
                         f"      Precision: {precision:.3f}  Recall: {recall:.3f}  "
                         f"Specificity: {specificity:.3f}  F1: {f1:.3f}"
                     )
-                    final_acc = evaluate_model(trained_model, test_loaders[ds_name])
+                    final_acc = _evaluate_any_model(arch_name, trained_model, test_loaders[ds_name])
                     all_results[ds_name][arch_name] = final_acc
                     train_histories[ds_name][arch_name]["accuracy"] = final_acc
                     print(f"    Test Accuracy: {final_acc*100:.2f}%")
@@ -689,8 +834,8 @@ def main():
                 print(header_line)
                 print("-" * len(header_line))
 
-                for arch_name, hidden_layers in architectures_to_train:
-                    row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
+                for arch_name, _arch_config in architectures_to_train:
+                    row_parts = [f"{_format_architecture(arch_name):{arch_col_width}s}"]
                     for ds_name in trainable_datasets:
                         acc = all_results[ds_name][arch_name]
                         row_parts.append(f"{acc * 100:9.2f}%")
@@ -731,7 +876,7 @@ def main():
                         if not val_losses:
                             continue
                         epochs_range = range(1, len(val_losses) + 1)
-                        arch = MLP_ARCHITECTURES.get(model_name, [])
+                        arch = _format_architecture(model_name)
                         ax.plot(epochs_range, val_losses, label=f"{arch}")
                     ax.set_title(f"Validation Loss - {ds_name}")
                     ax.set_xlabel("Epoch")
@@ -761,8 +906,8 @@ def main():
                 header_line = " | ".join(header_parts)
                 f.write(header_line + "\n")
                 f.write("-" * len(header_line) + "\n")
-                for arch_name, hidden_layers in architectures_to_train:
-                    row_parts = [f"{str(hidden_layers):{arch_col_width}s}"]
+                for arch_name, _arch_config in architectures_to_train:
+                    row_parts = [f"{_format_architecture(arch_name):{arch_col_width}s}"]
                     for ds_name in dataset_storage.keys():
                         acc = all_results[ds_name][arch_name]
                         row_parts.append(f"{acc * 100:9.2f}%")
@@ -770,6 +915,14 @@ def main():
                     # Remove P/R/S/F1 and duplicate train time row from file output
 
             print("\nResults saved to test_results.txt")
+
+            if _save_training_cache(trained_models, train_histories):
+                print(
+                    "Training weights saved to saved_trainingsets.json "
+                    f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+            else:
+                print("Warning: could not save training weights to saved_trainingsets.json.")
 
         elif choice == "8":
             if len(dataset_storage) <= 1:
@@ -845,9 +998,10 @@ def main():
                         batch_size=32,
                     )
 
-                    for arch_name, hidden_layers in architectures_to_train:
-                        model = MLP(hidden_layers, activation=activation)
-                        trained_model, _, _, _, train_time_ms = train_model(
+                    for arch_name, arch_config in architectures_to_train:
+                        model = _build_model(arch_name, arch_config, activation)
+                        trained_model, _, _, _, train_time_ms = _train_any_model(
+                            arch_name,
                             model,
                             run_train_loader,
                             run_val_loader,
@@ -859,9 +1013,9 @@ def main():
                             optimizer_type=optimizer_type,
                         )
 
-                        tn, fp, fn, tp = confusion_counts(trained_model, run_test_loader)
+                        tn, fp, fn, tp = _confusion_any_model(arch_name, trained_model, run_test_loader)
                         precision, recall, specificity, f1 = _compute_prsf1(tn, fp, fn, tp)
-                        acc = evaluate_model(trained_model, run_test_loader)
+                        acc = _evaluate_any_model(arch_name, trained_model, run_test_loader)
 
                         metrics = mc_results[ds_name][arch_name]
                         metrics["accuracy"].append(acc)
@@ -879,7 +1033,7 @@ def main():
 
             summary_rows = []
             for ds_name in ordered_datasets:
-                for arch_name, hidden_layers in architectures_to_train:
+                for arch_name, _arch_config in architectures_to_train:
                     m = mc_results[ds_name][arch_name]
                     acc_mean, acc_std, acc_ci = _mean_std_ci(m["accuracy"])
                     p_mean, p_std, p_ci = _mean_std_ci(m["precision"])
@@ -888,7 +1042,7 @@ def main():
                     f1_mean, f1_std, f1_ci = _mean_std_ci(m["f1"])
                     t_mean, t_std, t_ci = _mean_std_ci(m["train_time_s"])
 
-                    arch_label = str(hidden_layers)
+                    arch_label = _format_architecture(arch_name)
                     if len(arch_label) > 20:
                         arch_label = arch_label[:17] + "..."
 
@@ -904,7 +1058,7 @@ def main():
 
                     summary_rows.append({
                         "dataset": ds_name,
-                        "architecture": str(hidden_layers),
+                        "architecture": _format_architecture(arch_name),
                         "acc": (acc_mean, acc_std, acc_ci),
                         "p": (p_mean, p_std, p_ci),
                         "r": (r_mean, r_std, r_ci),
@@ -974,10 +1128,10 @@ def main():
                         continue
                     print(f"\nDataset: {ds_name}")
                     for model_name, model in trained_models[ds_name].items():
-                        pred, conf = predict(model, x, y)
+                        pred, conf = _predict_any_model(model_name, model, x, y)
                         all_conf_values.append(conf)
                         class_name = "C1" if pred == 0 else "C2"
-                        arch = MLP_ARCHITECTURES.get(model_name, [])
+                        arch = _format_architecture(model_name)
                         label = f"{model_name} {arch}"
                         print(f"{label:30s} -> {class_name} (confidence: {conf:.4f})")
                 if all_conf_values:
@@ -1048,13 +1202,13 @@ def main():
 
             cross_results = {}  # {model_name: {test_dataset: accuracy}}
             for model_name in available_models:
-                hidden_layers = MLP_ARCHITECTURES.get(model_name, "N/A")
+                hidden_layers = _format_architecture(model_name)
                 cross_results[model_name] = {}
                 print(f"{str(hidden_layers):24s} | ", end="")
                 model = trained_models[source_ds][model_name]
 
                 for test_ds in dataset_storage.keys():
-                    acc = evaluate_model(model, test_loaders[test_ds])
+                    acc = _evaluate_any_model(model_name, model, test_loaders[test_ds])
                     cross_results[model_name][test_ds] = acc
                     print(f"{acc*100:9.2f}% | ", end="")
                 print()
@@ -1071,7 +1225,7 @@ def main():
                     f.write(f"{test_ds:^10s} | ")
                 f.write("\n" + "-"*70 + "\n")
                 for model_name in available_models:
-                    hidden_layers = MLP_ARCHITECTURES.get(model_name, "N/A")
+                    hidden_layers = _format_architecture(model_name)
                     f.write(f"{str(hidden_layers):24s} | ")
                     for test_ds in dataset_storage.keys():
                         acc = cross_results[model_name][test_ds]
@@ -1105,7 +1259,7 @@ def main():
                 best_model_name = None
                 best_acc = -1.0
                 for model_name, model in ds_models.items():
-                    acc = evaluate_model(model, test_loaders[ds_name])
+                    acc = _evaluate_any_model(model_name, model, test_loaders[ds_name])
                     if acc > best_acc:
                         best_acc = acc
                         best_model_name = model_name
@@ -1114,8 +1268,8 @@ def main():
                     continue
 
                 model = ds_models[best_model_name]
-                fp_points, fn_points = _collect_fp_fn_points(model, test_loaders[ds_name])
-                arch = MLP_ARCHITECTURES.get(best_model_name, [])
+                fp_points, fn_points = _collect_fp_fn_points(best_model_name, model, test_loaders[ds_name])
+                arch = _format_architecture(best_model_name)
                 fp_fn_by_dataset[ds_name] = {
                     "fp": fp_points,
                     "fn": fn_points,
@@ -1145,7 +1299,7 @@ def main():
                 print("No datasets available. Create datasets first (option 1).")
                 continue
             model_names = [
-                name for name in MLP_ARCHITECTURES.keys()
+                name for name in ALL_ARCHITECTURES.keys()
                 if any(name in train_histories.get(ds, {}) for ds in ordered_datasets)
             ]
             if not model_names:
@@ -1166,7 +1320,7 @@ def main():
             print("-" * len(header_line))
             accuracy_table_lines = [header_line, "-" * len(header_line)]
             for model_name in model_names:
-                arch = MLP_ARCHITECTURES.get(model_name, [])
+                arch = _format_architecture(model_name)
                 row_parts = [f"{str(arch):{arch_col_width}s}"]
                 for ds_name in ordered_datasets:
                     acc = train_histories.get(ds_name, {}).get(model_name, {}).get("accuracy")
@@ -1190,7 +1344,7 @@ def main():
             print("-" * len(header_line))
             cpu_time_table_lines = [header_line, "-" * len(header_line)]
             for model_name in model_names:
-                arch = MLP_ARCHITECTURES.get(model_name, [])
+                arch = _format_architecture(model_name)
                 label = f"{model_name} {arch}"
                 if len(label) > model_col_width:
                     label = label[:model_col_width - 3] + "..."
@@ -1219,7 +1373,7 @@ def main():
             print("-" * len(param_header))
             param_table_lines = [param_header, "-" * len(param_header)]
             for model_name in model_names:
-                arch = MLP_ARCHITECTURES.get(model_name, [])
+                arch = _format_architecture(model_name)
                 model_for_params = None
                 for ds_name in ordered_datasets:
                     candidate = trained_models.get(ds_name, {}).get(model_name)
@@ -1246,14 +1400,14 @@ def main():
             print("-" * len(header_line))
             prsf1_table_lines = [header_line, "-" * len(header_line)]
             for model_name in model_names:
-                arch = MLP_ARCHITECTURES.get(model_name, [])
+                arch = _format_architecture(model_name)
                 row_parts = [f"{str(arch):{arch_col_width}s}"]
                 for ds_name in ordered_datasets:
                     model = trained_models.get(ds_name, {}).get(model_name)
                     if model is None:
                         row_parts.append(f"{'--':>23s}")
                         continue
-                    tn, fp, fn, tp = confusion_counts(model, test_loaders[ds_name])
+                    tn, fp, fn, tp = _confusion_any_model(model_name, model, test_loaders[ds_name])
                     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
                     recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
                     specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
@@ -1346,6 +1500,8 @@ def main():
                 plt.close("all")
                 if _delete_dataset_cache():
                     print("Persisted datasets removed (saved_datasets.json).")
+                if _delete_training_cache():
+                    print("Persisted training weights removed (saved_trainingsets.json).")
                 print("Datasets cleared.")
                 print("Test data cleared.")
             if clear_train:
@@ -1354,6 +1510,8 @@ def main():
                 last_train_config = None
                 last_mc_summary_rows = None
                 last_mc_meta = None
+                if _delete_training_cache():
+                    print("Persisted training weights removed (saved_trainingsets.json).")
                 print("Training data cleared.")
 
             results_path = Path("test_results.txt")
