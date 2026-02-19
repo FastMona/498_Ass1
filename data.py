@@ -21,15 +21,7 @@ _C2_PATH = _REGION_PATHS["C2"]
 # Data Generation Helpers
 # ============================
 
-def _apply_normalization(x, y, norm_stats):
-    if not norm_stats:
-        return x, y
-    mean = np.asarray(norm_stats["mean"], dtype=float)
-    std = np.asarray(norm_stats["std"], dtype=float)
-    return (x - mean[0]) / std[0], (y - mean[1]) / std[1]
-
-
-def _plot_interlocked_region_boundaries(ax, norm_stats=None):
+def _plot_interlocked_region_boundaries(ax):
     c1_x, c1_y = build_c1_boundary()
     c2_x, c2_y = -c1_x, -c1_y - 1.0
 
@@ -37,8 +29,6 @@ def _plot_interlocked_region_boundaries(ax, norm_stats=None):
     c2_keep = ~_C1_PATH.contains_points(c2_points, radius=_BOUNDARY_RADIUS)
     shared_arc = (np.abs(c2_x ** 2 + (c2_y + 1.0) ** 2 - 1.0) <= 1e-3) & (c2_x >= 0.0)
     c2_keep &= ~shared_arc
-    c1_x, c1_y = _apply_normalization(c1_x, c1_y, norm_stats)
-    c2_x, c2_y = _apply_normalization(c2_x, c2_y, norm_stats)
 
     ax.fill(c1_x, c1_y, color="#CCE5FF", alpha=0.7, zorder=0, edgecolor="none")
     ax.fill(c2_x, c2_y, color="#FFE5CC", alpha=0.7, zorder=0, edgecolor="none")
@@ -49,11 +39,10 @@ def _plot_interlocked_region_boundaries(ax, norm_stats=None):
 
     seg_y = np.array([-3.0, -2.0])
     seg_x = np.zeros_like(seg_y)
-    seg_x, seg_y = _apply_normalization(seg_x, seg_y, norm_stats)
     ax.plot(seg_x, seg_y, color="tab:orange", lw=2.5, zorder=1)
 
 
-def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_dataset=None):
+def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data):
     """Plot side-by-side comparison of RND, CTR, and EDGE sampling methods."""
     _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 4))
 
@@ -82,10 +71,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     # Plot RND (left subplot)
     ax1.plot(x_c1_rnd, y_c1_rnd, '.', label='C1', alpha=0.6, markersize=3)
     ax1.plot(x_c2_rnd, y_c2_rnd, '.', label='C2', alpha=0.6, markersize=3)
-    _plot_interlocked_region_boundaries(
-        ax1,
-        norm_stats=(norm_stats_by_dataset or {}).get("RND"),
-    )
+    _plot_interlocked_region_boundaries(ax1)
     ax1.set_xlabel('$x_1$')
     ax1.set_ylabel('$x_2$')
     ax1.set_title(f'RND (Uniform Random Sampling) - {rnd_count} points')
@@ -96,10 +82,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     # Plot CTR (middle subplot)
     ax2.plot(x_c1_ctr, y_c1_ctr, '.', label='C1', alpha=0.6, markersize=3)
     ax2.plot(x_c2_ctr, y_c2_ctr, '.', label='C2', alpha=0.6, markersize=3)
-    _plot_interlocked_region_boundaries(
-        ax2,
-        norm_stats=(norm_stats_by_dataset or {}).get("CTR"),
-    )
+    _plot_interlocked_region_boundaries(ax2)
     ax2.set_xlabel('$x_1$')
     ax2.set_ylabel('$x_2$')
     ax2.set_title(f'CTR (Center-Weighted Sampling)) - {ctr_count} points')
@@ -110,10 +93,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     # Plot EDGE (right subplot)
     ax3.plot(x_c1_edge, y_c1_edge, '.', label='C1', alpha=0.6, markersize=3)
     ax3.plot(x_c2_edge, y_c2_edge, '.', label='C2', alpha=0.6, markersize=3)
-    _plot_interlocked_region_boundaries(
-        ax3,
-        norm_stats=(norm_stats_by_dataset or {}).get("EDGE"),
-    )
+    _plot_interlocked_region_boundaries(ax3)
     ax3.set_xlabel('$x_1$')
     ax3.set_ylabel('$x_2$')
     ax3.set_title(f'EDGE (Boundary-Attracted Sampling) - {edge_count} points')
@@ -125,7 +105,7 @@ def _plot_three_sampling_methods(rnd_data, ctr_data, edge_data, norm_stats_by_da
     plt.show()
 
 
-def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset, norm_stats_by_dataset=None):
+def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset):
     """Plot datasets with FP/FN points overlaid in a new window."""
     _, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
 
@@ -147,10 +127,7 @@ def plot_three_datasets_with_fp_fn(dataset_storage, fp_fn_by_dataset, norm_stats
 
         ax.plot(x_c1, y_c1, '.', label='C1', alpha=0.6, markersize=3)
         ax.plot(x_c2, y_c2, '.', label='C2', alpha=0.6, markersize=3)
-        _plot_interlocked_region_boundaries(
-            ax,
-            norm_stats=(norm_stats_by_dataset or {}).get(ds_name),
-        )
+        _plot_interlocked_region_boundaries(ax)
 
         fp_fn = fp_fn_by_dataset.get(ds_name, {})
         fp_points = fp_fn.get("fp", [])
@@ -367,29 +344,10 @@ DATA_PARAMS = {
     "noise_std": 0.0,      # Gaussian noise (0 for clean boundaries)
     "seed": 7,
     "sampling_method": "ALL",  # "RND" (uniform random), "CTR" (center-weighted), "EDGE" (boundary-attracted), or "ALL" (generate all three)
-    "normalize": False,   # Normalize to zero mean/unit variance
 }
 
 
-def normalize_region_data(data_points):
-    """Normalize region-sample coordinates to zero mean and unit variance."""
-    if not data_points:
-        return data_points, {"mean": np.zeros(2), "std": np.ones(2)}
-
-    x_data = np.array([[x, y] for x, y, _ in data_points], dtype=float)
-    mean = x_data.mean(axis=0)
-    std = x_data.std(axis=0)
-    std = np.where(std == 0.0, 1.0, std)
-
-    normalized = [
-        ((x - mean[0]) / std[0], (y - mean[1]) / std[1], label)
-        for x, y, label in data_points
-    ]
-
-    return normalized, {"mean": mean, "std": std}
-
-
-def plot_dataset(data_points, data_params, active_dataset, plot_fig=None, norm_stats=None):
+def plot_dataset(data_points, data_params, active_dataset, plot_fig=None):
     """Plot a single dataset with boundaries and return the figure handle."""
     if plot_fig is None or not plt.fignum_exists(plot_fig.number):
         plot_fig = plt.figure(figsize=(8, 8))
@@ -404,10 +362,7 @@ def plot_dataset(data_points, data_params, active_dataset, plot_fig=None, norm_s
     plt.plot(x_data[c1_mask, 0], x_data[c1_mask, 1], '.', label='C1', alpha=0.6)
     plt.plot(x_data[c2_mask, 0], x_data[c2_mask, 1], '.', label='C2', alpha=0.6)
 
-    _plot_interlocked_region_boundaries(
-        plt.gca(),
-        norm_stats=norm_stats,
-    )
+    _plot_interlocked_region_boundaries(plt.gca())
     plt.xlabel('$x_1$')
     plt.ylabel('$x_2$')
     n_points = data_params.get("n", "?") if isinstance(data_params, dict) else "?"
@@ -426,12 +381,7 @@ def generate_intertwined_spirals(*args, **kwargs):
     return generate_interlocked_region_data(*args, **kwargs)
 
 
-def normalize_spirals(*args, **kwargs):
-    """Backward-compatible alias for normalize_region_data()."""
-    return normalize_region_data(*args, **kwargs)
-
-
-def plot_three_datasets(dataset_storage, data_params, norm_stats_by_dataset=None):
+def plot_three_datasets(dataset_storage, data_params):
     """Plot RND, CTR, and EDGE datasets side-by-side in one window."""
     rnd_data = dataset_storage.get("RND")
     ctr_data = dataset_storage.get("CTR")
@@ -445,7 +395,6 @@ def plot_three_datasets(dataset_storage, data_params, norm_stats_by_dataset=None
         rnd_data,
         ctr_data,
         edge_data,
-        norm_stats_by_dataset=norm_stats_by_dataset,
     )
     return True
 
@@ -453,9 +402,7 @@ def plot_three_datasets(dataset_storage, data_params, norm_stats_by_dataset=None
 __all__ = [
     "DATA_PARAMS",
     "generate_interlocked_region_data",
-    "normalize_region_data",
     "generate_intertwined_spirals",
-    "normalize_spirals",
     "plot_dataset",
     "plot_three_datasets",
     "plot_three_datasets_with_fp_fn",

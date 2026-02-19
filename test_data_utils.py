@@ -1,9 +1,7 @@
 import unittest
 from typing import Sized, cast
 
-import numpy as np
-
-from data import generate_interlocked_region_data, normalize_region_data
+from data import generate_interlocked_region_data
 from MLPx6 import prepare_data
 
 
@@ -31,18 +29,6 @@ class TestDataUtilities(unittest.TestCase):
         labels = {label for _, _, label in data}
         self.assertEqual(len(data), 2 * n)
         self.assertEqual(labels, {0, 1})
-
-    def test_normalize_region_data_stats(self):
-        data = generate_interlocked_region_data(n=200, seed=7, plot=False, sampling_method="RND")
-        normalized, stats = normalize_region_data(data)
-        self.assertEqual(len(normalized), len(data))
-        mean = np.array(stats["mean"], dtype=float)
-        std = np.array(stats["std"], dtype=float)
-        self.assertEqual(mean.shape, (2,))
-        self.assertEqual(std.shape, (2,))
-        norm_xy = np.array([[x, y] for x, y, _ in normalized], dtype=float)
-        self.assertTrue(np.allclose(norm_xy.mean(axis=0), np.zeros(2), atol=1e-6))
-        self.assertTrue(np.allclose(norm_xy.std(axis=0), np.ones(2), atol=1e-6))
 
     def test_prepare_data_split_sizes(self):
         data = [(float(i), float(i + 1), i % 2) for i in range(100)]

@@ -12,9 +12,9 @@ import torch.nn as nn
 # ============================
 
 CPN_ARCHITECTURES = {
-	"CPN_4": {"n_kohonen": 100, "input_mode": "augmented_unit_sphere"},
-	"CPN_5": {"n_kohonen": 150, "input_mode": "augmented_unit_sphere"},
-	"CPN_6": {"n_kohonen": 200, "input_mode": "augmented_unit_sphere"},
+	"CPN_4": {"n_kohonen": 100, "input_mode": "l2"},
+	"CPN_5": {"n_kohonen": 150, "input_mode": "l2"},
+	"CPN_6": {"n_kohonen": 200, "input_mode": "l2"},
 }
 
 
@@ -25,7 +25,7 @@ CPN_ARCHITECTURES = {
 CPN_PARAMS = {
 	"input_size": 2,
 	"output_size": 1,
-	"input_mode": "augmented_unit_sphere",  # "augmented_unit_sphere" or "l2"
+	"input_mode": "l2",  # "augmented_unit_sphere" or "l2"
 	"eta_start": 0.35,
 	"eta_end": 0.03,
 	"alpha": 0.08,

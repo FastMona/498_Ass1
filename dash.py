@@ -9,7 +9,6 @@ from datetime import datetime
 from data import (
     DATA_PARAMS,
     generate_interlocked_region_data,
-    normalize_region_data,
     plot_three_datasets,
     plot_three_datasets_with_fp_fn,
 )
@@ -110,7 +109,6 @@ def _confusion_any_model(model_name, model, test_loader):
 def _generate_datasets(data_params, active_dataset):
     sampling_method = data_params.get("sampling_method", "ALL")
     dataset_storage = {}
-    norm_stats_by_dataset = {}
 
     if sampling_method == "ALL":
         result = generate_interlocked_region_data(
@@ -131,14 +129,7 @@ def _generate_datasets(data_params, active_dataset):
         dataset_storage[sampling_method] = data_points
         active_dataset = sampling_method
 
-    if data_params.get("normalize", False):
-        for ds_name, ds_data in list(dataset_storage.items()):
-            normalized_data, stats = normalize_region_data(ds_data)
-            dataset_storage[ds_name] = normalized_data
-            norm_stats_by_dataset[ds_name] = stats
-        data_points = dataset_storage[active_dataset]
-
-    return dataset_storage, active_dataset, data_points, sampling_method, norm_stats_by_dataset
+    return dataset_storage, active_dataset, data_points, sampling_method
 
 
 def _init_dataloaders(dataset_storage, batch_size=32, test_split=0.2, val_split=0.2):
@@ -179,10 +170,14 @@ def _collect_fp_fn_points(model_name, model, test_loader):
             fn_mask = (predicted == 0) & (y_batch == 1)
 
             if fp_mask.any():
-                fp_xy = x_batch[fp_mask.squeeze()]
+                fp_xy = x_batch[fp_mask.view(-1)]
+                if fp_xy.ndim == 1:
+                    fp_xy = fp_xy.unsqueeze(0)
                 fp_points.extend([(float(x), float(y)) for x, y in fp_xy.tolist()])
             if fn_mask.any():
-                fn_xy = x_batch[fn_mask.squeeze()]
+                fn_xy = x_batch[fn_mask.view(-1)]
+                if fn_xy.ndim == 1:
+                    fn_xy = fn_xy.unsqueeze(0)
                 fn_points.extend([(float(x), float(y)) for x, y in fn_xy.tolist()])
     return fp_points, fn_points
 
@@ -369,7 +364,7 @@ def _print_training_time_summary(train_histories, dataset_storage, points_per_ca
     print("\nTraining time summary saved to test_results.txt")
 
 
-def _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_stats_by_dataset, data_params):
+def _save_dataset_cache(dataset_storage, active_dataset, sampling_method, data_params):
     payload = {
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "dataset_storage": {
@@ -378,16 +373,9 @@ def _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_s
         },
         "active_dataset": active_dataset,
         "sampling_method": sampling_method,
-        "norm_stats_by_dataset": {
-            ds_name: {
-                "mean": np.asarray(stats.get("mean", [0.0, 0.0]), dtype=float).tolist(),
-                "std": np.asarray(stats.get("std", [1.0, 1.0]), dtype=float).tolist(),
-            }
-            for ds_name, stats in (norm_stats_by_dataset or {}).items()
-        },
         "data_params": {
             key: data_params.get(key)
-            for key in ("n", "noise_std", "seed", "normalize", "sampling_method")
+            for key in ("n", "noise_std", "seed", "sampling_method")
         },
     }
     try:
@@ -464,14 +452,6 @@ def _load_dataset_cache():
 
     sampling_method = payload.get("sampling_method", "ALL")
 
-    norm_stats_by_dataset = {}
-    for ds_name, stats in payload.get("norm_stats_by_dataset", {}).items():
-        if not isinstance(stats, dict):
-            continue
-        mean = np.asarray(stats.get("mean", [0.0, 0.0]), dtype=float).tolist()
-        std = np.asarray(stats.get("std", [1.0, 1.0]), dtype=float).tolist()
-        norm_stats_by_dataset[ds_name] = {"mean": mean, "std": std}
-
     data_params = payload.get("data_params", {}) if isinstance(payload.get("data_params", {}), dict) else {}
     saved_at = payload.get("saved_at")
 
@@ -479,7 +459,6 @@ def _load_dataset_cache():
         "dataset_storage": dataset_storage,
         "active_dataset": active_dataset,
         "sampling_method": sampling_method,
-        "norm_stats_by_dataset": norm_stats_by_dataset,
         "data_params": data_params,
         "saved_at": saved_at,
     }
@@ -515,7 +494,6 @@ def main():
     dataset_storage = {}
     data_points = []
     sampling_method = DATA_PARAMS.get("sampling_method", "ALL")
-    norm_stats_by_dataset = {}
     last_train_config = None
     last_mc_summary_rows = None
     last_mc_meta = None
@@ -531,8 +509,7 @@ def main():
         dataset_storage = loaded_cache["dataset_storage"]
         active_dataset = loaded_cache["active_dataset"]
         sampling_method = loaded_cache["sampling_method"]
-        norm_stats_by_dataset = loaded_cache["norm_stats_by_dataset"]
-        for key in ("n", "noise_std", "seed", "normalize", "sampling_method"):
+        for key in ("n", "noise_std", "seed", "sampling_method"):
             if key in loaded_cache["data_params"]:
                 DATA_PARAMS[key] = loaded_cache["data_params"][key]
         data_points = dataset_storage.get(active_dataset, [])
@@ -544,7 +521,7 @@ def main():
     else:
         print("\nNo datasets loaded. Use option 1 to generate datasets.")
 
-    active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed", "normalize")}
+    active_params = {k: DATA_PARAMS[k] for k in ("n", "noise_std", "seed")}
     print(f"Data parameters (active): {active_params}")
     print(f"Sampling method: {sampling_method}")
     
@@ -628,13 +605,10 @@ def main():
                 min_value=0,
             )
 
-            normalize_str = input("Normalize to zero mean/unit variance? (y/N): ").strip().lower()
-            DATA_PARAMS["normalize"] = normalize_str in {"y", "yes"}
-
-            dataset_storage, active_dataset, data_points, sampling_method, norm_stats_by_dataset = _generate_datasets(
+            dataset_storage, active_dataset, data_points, sampling_method = _generate_datasets(
                 DATA_PARAMS, active_dataset
             )
-            if _save_dataset_cache(dataset_storage, active_dataset, sampling_method, norm_stats_by_dataset, DATA_PARAMS):
+            if _save_dataset_cache(dataset_storage, active_dataset, sampling_method, DATA_PARAMS):
                 print(
                     "Datasets saved to saved_datasets.json "
                     f"at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
@@ -650,10 +624,7 @@ def main():
                 train_pct, val_pct, test_pct = _split_percentages(split_params)
                 print(f"Split: {train_pct:.0f}% train / {val_pct:.0f}% validation / {test_pct:.0f}% test")
                 print(f"Points per region: {DATA_PARAMS['n']}")
-                print(f"Normalization: {'enabled' if DATA_PARAMS.get('normalize', False) else 'disabled'}")
                 print("Generated RND, CTR, and EDGE datasets")
-            if DATA_PARAMS.get("normalize", False):
-                print("Normalization: enabled (zero mean/unit variance)")
 
             total_points = len(data_points)
             points_per_region = DATA_PARAMS["n"]
@@ -692,7 +663,7 @@ def main():
                 n_train = n_trainval - n_val
                 print(f"  {ds_name}: {total} total ({n_train} train, {n_val} val, {n_test} test)")
             
-            if not plot_three_datasets(dataset_storage, DATA_PARAMS, norm_stats_by_dataset=norm_stats_by_dataset):
+            if not plot_three_datasets(dataset_storage, DATA_PARAMS):
                 print("Missing datasets; recreate datasets first (option 1).")
         elif choice == "3":
             if len(dataset_storage) <= 1:
@@ -796,8 +767,15 @@ def main():
                         "accuracy": None,  # will be set below
                     }
 
-                    total_params = sum(param.numel() for param in trained_model.parameters())
-                    print(f"    Total parameters saved: {total_params}")
+                    if _is_cpn_architecture(arch_name):
+                        kohonen_weight_count = int(trained_model.kohonen_weights.numel())
+                        grossberg_weight_count = int(trained_model.grossberg_weights.numel())
+                        print("    Parameters saved:")
+                        print(f"      Kohonen weights:  {kohonen_weight_count}")
+                        print(f"      Grossberg weights:{grossberg_weight_count}")
+                    else:
+                        total_params = sum(param.numel() for param in trained_model.parameters())
+                        print(f"    Total parameters saved: {total_params}")
                     tn, fp, fn, tp = _confusion_any_model(arch_name, trained_model, test_loaders[ds_name])
                     print("    Confusion (test set):")
                     print(f"      TN: {tn:5d}  FP: {fp:5d}")
@@ -1245,10 +1223,42 @@ def main():
 
             limit = _read_int("Max points to list per category (default 20): ", default=20, min_value=1)
 
+            available_model_names = [
+                name for name in ALL_ARCHITECTURES.keys()
+                if any(name in trained_models.get(ds_name, {}) for ds_name in dataset_storage.keys())
+            ]
+            if not available_model_names:
+                print("No trained architectures available.")
+                continue
+
+            print("\nAvailable architectures for FP/FN:")
+            for i, model_name in enumerate(available_model_names, 1):
+                print(f"  {i}. {model_name}: {_format_architecture(model_name)}")
+
+            model_choice = input(
+                "Select architecture index/name (default: best per dataset): "
+            ).strip()
+
+            selected_model_name = None
+            if model_choice:
+                if model_choice.isdigit():
+                    model_index = int(model_choice) - 1
+                    if 0 <= model_index < len(available_model_names):
+                        selected_model_name = available_model_names[model_index]
+                    else:
+                        print("Invalid index. Falling back to best per dataset.")
+                elif model_choice in available_model_names:
+                    selected_model_name = model_choice
+                else:
+                    print("Unknown architecture. Falling back to best per dataset.")
+
             fp_fn_by_dataset = {}
 
             print("\n" + "="*60)
-            print("FP/FN POINTS FOR BEST MODEL PER DATASET")
+            if selected_model_name is None:
+                print("FP/FN POINTS FOR BEST MODEL PER DATASET")
+            else:
+                print(f"FP/FN POINTS FOR {selected_model_name} PER DATASET")
             print("="*60)
 
             for ds_name in dataset_storage.keys():
@@ -1256,29 +1266,43 @@ def main():
                 if not ds_models:
                     continue
 
-                best_model_name = None
-                best_acc = -1.0
-                for model_name, model in ds_models.items():
-                    acc = _evaluate_any_model(model_name, model, test_loaders[ds_name])
-                    if acc > best_acc:
-                        best_acc = acc
-                        best_model_name = model_name
+                if selected_model_name is None:
+                    best_model_name = None
+                    best_acc = -1.0
+                    for model_name, model in ds_models.items():
+                        acc = _evaluate_any_model(model_name, model, test_loaders[ds_name])
+                        if acc > best_acc:
+                            best_acc = acc
+                            best_model_name = model_name
 
-                if best_model_name is None:
-                    continue
+                    if best_model_name is None:
+                        continue
+                    model_name_for_ds = best_model_name
+                    model = ds_models[model_name_for_ds]
+                    model_acc = best_acc
+                else:
+                    if selected_model_name not in ds_models:
+                        print(f"\nDataset: {ds_name}")
+                        print(f"Model {selected_model_name} not trained on this dataset.")
+                        continue
+                    model_name_for_ds = selected_model_name
+                    model = ds_models[model_name_for_ds]
+                    model_acc = _evaluate_any_model(model_name_for_ds, model, test_loaders[ds_name])
 
-                model = ds_models[best_model_name]
-                fp_points, fn_points = _collect_fp_fn_points(best_model_name, model, test_loaders[ds_name])
-                arch = _format_architecture(best_model_name)
+                fp_points, fn_points = _collect_fp_fn_points(model_name_for_ds, model, test_loaders[ds_name])
+                arch = _format_architecture(model_name_for_ds)
                 fp_fn_by_dataset[ds_name] = {
                     "fp": fp_points,
                     "fn": fn_points,
-                    "model_name": best_model_name,
-                    "acc": best_acc,
+                    "model_name": model_name_for_ds,
+                    "acc": model_acc,
                 }
 
                 print(f"\nDataset: {ds_name}")
-                print(f"Best model: {best_model_name} {arch} | acc: {best_acc*100:.2f}%")
+                if selected_model_name is None:
+                    print(f"Best model: {model_name_for_ds} {arch} | acc: {model_acc*100:.2f}%")
+                else:
+                    print(f"Model: {model_name_for_ds} {arch} | acc: {model_acc*100:.2f}%")
                 _print_point_list("FP (pred C2, true C1)", fp_points, limit)
                 _print_point_list("FN (pred C1, true C2)", fn_points, limit)
 
@@ -1286,7 +1310,6 @@ def main():
                 plot_three_datasets_with_fp_fn(
                     dataset_storage,
                     fp_fn_by_dataset,
-                    norm_stats_by_dataset=norm_stats_by_dataset,
                 )
 
         elif choice == "7":
@@ -1367,8 +1390,8 @@ def main():
             print("\n" + "="*60)
             print("PARAMETER COUNT SUMMARY - CURRENT ARCHITECTURES")
             print("="*60)
-            param_col_width = 12
-            param_header = f"{'Architecture':{arch_col_width}s} | {'# Params':>{param_col_width}s}"
+            param_col_width = 24
+            param_header = f"{'Architecture':{arch_col_width}s} | {'Params':>{param_col_width}s}"
             print(param_header)
             print("-" * len(param_header))
             param_table_lines = [param_header, "-" * len(param_header)]
@@ -1383,7 +1406,12 @@ def main():
                 if model_for_params is None:
                     param_text = "N/A"
                 else:
-                    param_text = f"{sum(param.numel() for param in model_for_params.parameters()):,}"
+                    if _is_cpn_architecture(model_name):
+                        kohonen_weight_count = int(model_for_params.kohonen_weights.numel())
+                        grossberg_weight_count = int(model_for_params.grossberg_weights.numel())
+                        param_text = f"K:{kohonen_weight_count:,} G:{grossberg_weight_count:,}"
+                    else:
+                        param_text = f"{sum(param.numel() for param in model_for_params.parameters()):,}"
                 line = f"{str(arch):{arch_col_width}s} | {param_text:>{param_col_width}s}"
                 print(line)
                 param_table_lines.append(line)
