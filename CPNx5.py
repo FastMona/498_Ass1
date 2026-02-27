@@ -12,9 +12,11 @@ import torch.nn as nn
 # ============================
 
 CPN_ARCHITECTURES = {
+	"CPN_1": {"n_kohonen": 100, "input_mode": "l2"},
+	"CPN_2": {"n_kohonen": 150, "input_mode": "l2"},
+	"CPN_3": {"n_kohonen": 200, "input_mode": "l2"},
 	"CPN_4": {"n_kohonen": 100, "input_mode": "l2"},
-	"CPN_5": {"n_kohonen": 150, "input_mode": "l2"},
-	"CPN_6": {"n_kohonen": 200, "input_mode": "l2"},
+	"CPN_5": {"n_kohonen": 100, "input_mode": "l2"},
 }
 
 

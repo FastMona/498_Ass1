@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import torch
+import torch.nn as nn
 import numpy as np
 import json
 import sys
@@ -12,7 +13,7 @@ from data import (
     plot_three_datasets,
     plot_three_datasets_with_fp_fn,
 )
-from MLPx6 import (
+from MLPx5 import (
     MLP,
     MLP_ARCHITECTURES,
     get_best_device,
@@ -22,7 +23,7 @@ from MLPx6 import (
     predict as predict_mlp,
     confusion_counts as confusion_counts_mlp,
 )
-from CPNx6 import (
+from CPNx5 import (
     CPN,
     CPN_ARCHITECTURES,
     CPN_PARAMS,
@@ -396,6 +397,27 @@ def _serialize_model_state(model):
     return serialized
 
 
+def _detect_mlp_activation(model):
+    network = getattr(model, "network", None)
+    if network is None:
+        return "leaky_relu"
+    for layer in network:
+        if isinstance(layer, nn.LeakyReLU):
+            return "leaky_relu"
+        if isinstance(layer, nn.ReLU):
+            return "relu"
+        if isinstance(layer, nn.Tanh):
+            return "tanh"
+    return "leaky_relu"
+
+
+def _deserialize_model_state(state_dict_payload):
+    deserialized = {}
+    for key, value in state_dict_payload.items():
+        deserialized[key] = torch.tensor(value, dtype=torch.float32)
+    return deserialized
+
+
 def _save_training_cache(trained_models, train_histories):
     payload = {
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -409,9 +431,13 @@ def _save_training_cache(trained_models, train_histories):
 
         for model_name, model in models.items():
             history = train_histories.get(ds_name, {}).get(model_name, {})
+            activation = None
+            if not _is_cpn_architecture(model_name):
+                activation = _detect_mlp_activation(model)
             payload["trained_models"][ds_name][model_name] = {
                 "model_type": "CPN" if _is_cpn_architecture(model_name) else "MLP",
                 "architecture": _format_architecture(model_name),
+                "activation": activation,
                 "state_dict": _serialize_model_state(model),
                 "metrics": {
                     "accuracy": float(history["accuracy"]) if history.get("accuracy") is not None else None,
@@ -461,6 +487,78 @@ def _load_dataset_cache():
         "sampling_method": sampling_method,
         "data_params": data_params,
         "saved_at": saved_at,
+    }
+
+
+def _load_training_cache(dataset_storage):
+    if not TRAINING_CACHE_PATH.exists():
+        return None
+    try:
+        payload = json.loads(TRAINING_CACHE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    raw_trained_models = payload.get("trained_models", {})
+    if not isinstance(raw_trained_models, dict):
+        return None
+
+    loaded_models = {ds_name: {} for ds_name in dataset_storage.keys()}
+    loaded_histories = {ds_name: {} for ds_name in dataset_storage.keys()}
+    loaded_count = 0
+    skipped_count = 0
+
+    for ds_name, models_payload in raw_trained_models.items():
+        if ds_name not in dataset_storage:
+            skipped_count += 1
+            continue
+        if not isinstance(models_payload, dict):
+            skipped_count += 1
+            continue
+
+        for model_name, model_payload in models_payload.items():
+            if model_name not in ALL_ARCHITECTURES:
+                skipped_count += 1
+                continue
+            if not isinstance(model_payload, dict):
+                skipped_count += 1
+                continue
+
+            state_dict_payload = model_payload.get("state_dict", {})
+            if not isinstance(state_dict_payload, dict):
+                skipped_count += 1
+                continue
+
+            activation = "leaky_relu"
+            if not _is_cpn_architecture(model_name):
+                saved_activation = model_payload.get("activation")
+                if isinstance(saved_activation, str) and saved_activation.strip():
+                    activation = saved_activation.strip().lower()
+
+            try:
+                model = _build_model(model_name, ALL_ARCHITECTURES[model_name], activation)
+                model.load_state_dict(_deserialize_model_state(state_dict_payload))
+                model.eval()
+            except (RuntimeError, ValueError, TypeError):
+                skipped_count += 1
+                continue
+
+            metrics = model_payload.get("metrics", {})
+            if not isinstance(metrics, dict):
+                metrics = {}
+
+            loaded_models[ds_name][model_name] = model
+            loaded_histories[ds_name][model_name] = {
+                "accuracy": metrics.get("accuracy"),
+                "train_time_s": metrics.get("train_time_s"),
+            }
+            loaded_count += 1
+
+    return {
+        "saved_at": payload.get("saved_at"),
+        "trained_models": loaded_models,
+        "train_histories": loaded_histories,
+        "loaded_count": loaded_count,
+        "skipped_count": skipped_count,
     }
 
 
@@ -536,21 +634,46 @@ def main():
         dataset_storage, batch_size=32, test_split=split_params["test_split"], val_split=split_params["val_split"]
     )
 
+    loaded_training_cache = _load_training_cache(dataset_storage)
+    if loaded_training_cache is not None and loaded_training_cache["loaded_count"] > 0:
+        for ds_name, models in loaded_training_cache["trained_models"].items():
+            trained_models[ds_name].update(models)
+        for ds_name, histories in loaded_training_cache["train_histories"].items():
+            train_histories[ds_name].update(histories)
+
+        training_saved_at = loaded_training_cache.get("saved_at")
+        if training_saved_at:
+            print(
+                f"Loaded persisted training weights from saved_trainingsets.json "
+                f"(saved at {training_saved_at})."
+            )
+        else:
+            print("Loaded persisted training weights from saved_trainingsets.json.")
+
+        skipped_count = loaded_training_cache.get("skipped_count", 0)
+        if skipped_count:
+            print(
+                f"Loaded {loaded_training_cache['loaded_count']} model(s); "
+                f"skipped {skipped_count} incompatible/missing entries."
+            )
+        else:
+            print(f"Loaded {loaded_training_cache['loaded_count']} model(s).")
+
     plt.ion()
 
     while True:
         print("\n" + "="*60)
         print("MAIN MENU")
         print("="*60)
-        print("1. Create Datasets")
+        print("1. Create and SaveDatasets")
         print("2. Display Current Dataset")
-        print("3. Train on ALL Datasets")
-        print("4. Single Point Test (classify one point)")
-        print("5. Cross-Dataset Comparison")
-        print("6. List/Display FP/FN Points (best models)")
-        print("7. Training Summary")
-        print("8. Monte Carlo Training (repeat option 3 config)")
-        print("9. Cleanup")
+        print("3. Train and Save Datasets")
+        print("4. Single Point Test (enter x, y)")
+        print("5. Monte Carlo Training ( 20x opt3-not saved)")
+        print("6. Cross-Dataset Comparison")
+        print("7. List/Display FP/FN Points (one model)")
+        print("8. Training Summary")        
+        print("9. Cleanup Saved Datasets/Models/test_results")
         print("0. Exit")
         print("="*60)
 
@@ -902,7 +1025,7 @@ def main():
             else:
                 print("Warning: could not save training weights to saved_trainingsets.json.")
 
-        elif choice == "8":
+        elif choice == "5":
             if len(dataset_storage) <= 1:
                 print("\nCreate datasets first (option 1) before running Monte Carlo training.")
                 continue
@@ -1131,7 +1254,7 @@ def main():
             print("\nExiting. Goodbye!")
             break
 
-        elif choice == "5":
+        elif choice == "6":
             if len(dataset_storage) <= 1:
                 print("\nCreate datasets first (option 1) before cross-dataset comparison.")
                 continue
@@ -1212,7 +1335,7 @@ def main():
 
             print("\nResults saved to test_results.txt")
 
-        elif choice == "6":
+        elif choice == "7":
             if not any(any(models.values()) for models in trained_models.values()):
                 print("\nNo trained models yet. Please train models first (option 3).")
                 continue
@@ -1312,7 +1435,7 @@ def main():
                     fp_fn_by_dataset,
                 )
 
-        elif choice == "7":
+        elif choice == "8":
             points_per_cat = DATA_PARAMS.get("n", "?")
             ordered_datasets = _select_datasets(
                 dataset_storage,

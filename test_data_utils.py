@@ -2,7 +2,7 @@ import unittest
 from typing import Sized, cast
 
 from data import generate_interlocked_region_data
-from MLPx6 import prepare_data
+from MLPx5 import prepare_data
 
 
 class TestDataUtilities(unittest.TestCase):

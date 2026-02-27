@@ -218,7 +218,7 @@ The project includes comprehensive visualization capabilities:
 ├── dash.py              # Main interactive dashboard
 ├── data.py              # Data generation and sampling methods
 ├── regions.py           # Geometric region definitions
-├── MLPx6.py             # MLP architectures and training utilities
+├── MLPx5.py             # MLP architectures and training utilities
 ├── test_results.txt     # Saved experimental results
 └── README.md            # This report
 ```

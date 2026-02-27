@@ -17,4 +17,4 @@ dependencies = [
 ]
 
 [tool.setuptools]
-py-modules = ["dash", "data", "MLPx6", "regions"]
+py-modules = ["dash", "data", "MLPx5", "regions"]
